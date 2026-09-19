@@ -60,7 +60,7 @@ describe("Python Analysis compatibility and invariants", () => {
   it("rejects future schemas, unsafe pickle, and empty saved Analyses", () => {
     expect(() =>
       decode(
-        encode(fixture()).replace('"schema_version": 1', '"schema_version": 3'),
+        encode(fixture()).replace('"schema_version": 1', '"schema_version": 4'),
       ),
     ).toThrow();
     expect(() => decode("\x80\x04pickle")).toThrow(/Python app/);

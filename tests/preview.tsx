@@ -31,6 +31,37 @@ a.clips = [
   creation_order: i,
 }));
 let saved = { analysis: a, path: null, stamp: null };
+if (new URLSearchParams(location.search).has("annotations"))
+  a.freeze_frames = [
+    {
+      id: crypto.randomUUID(),
+      clip_id: a.clips[0].id,
+      time_ms: 600,
+      hold_ms: 3000,
+      shapes: [
+        {
+          id: crypto.randomUUID(),
+          kind: "arrow",
+          x1: 0.2,
+          y1: 0.5,
+          x2: 0.8,
+          y2: 0.5,
+          color: "#FACC15",
+          width: 0.006,
+        },
+        {
+          id: crypto.randomUUID(),
+          kind: "circle",
+          x1: 0.3,
+          y1: 0.2,
+          x2: 0.5,
+          y2: 0.4,
+          color: "#FFFFFF",
+          width: 0.006,
+        },
+      ],
+    },
+  ];
 if (new URLSearchParams(location.search).has("playlists"))
   a.playlists = [
     {

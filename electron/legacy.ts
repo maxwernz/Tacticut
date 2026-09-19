@@ -290,6 +290,7 @@ export function importLegacy(data: Buffer, sourcePath: string): Analysis {
     categories: [],
     clips: [],
     playlists: [],
+    freeze_frames: [],
   };
   for (const value of clips) {
     if (!(value instanceof LegacyClip) || !value.state) return malformed();

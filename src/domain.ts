@@ -39,6 +39,32 @@ export const playlistSchema = z.object({
   name: z.string().trim().min(1).max(120),
   clip_ids: z.array(id),
 });
+const coordinate = z.number().finite().min(0).max(1);
+export const drawingSchema = z
+  .object({
+    id,
+    kind: z.enum(["arrow", "circle"]),
+    x1: coordinate,
+    y1: coordinate,
+    x2: coordinate,
+    y2: coordinate,
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+    width: z.number().finite().min(0.002).max(0.02),
+  })
+  .refine(
+    (s) =>
+      s.kind === "circle"
+        ? Math.abs(s.x2 - s.x1) >= 0.005 && Math.abs(s.y2 - s.y1) >= 0.005
+        : Math.hypot(s.x2 - s.x1, s.y2 - s.y1) >= 0.005,
+    "Drawing is too small",
+  );
+export const freezeFrameSchema = z.object({
+  id,
+  clip_id: id,
+  time_ms: ms,
+  hold_ms: z.number().int().min(500).max(15000),
+  shapes: z.array(drawingSchema).min(1).max(100),
+});
 export const analysisSchema = z
   .object({
     id,
@@ -47,11 +73,18 @@ export const analysisSchema = z
     categories: z.array(categorySchema),
     clips: z.array(clipSchema),
     playlists: z.array(playlistSchema).default([]),
+    freeze_frames: z.array(freezeFrameSchema).max(10000).default([]),
   })
   .superRefine((a, ctx) => {
     const problem = (message: string) =>
       ctx.addIssue({ code: "custom", message });
-    for (const rows of [a.source_videos, a.categories, a.clips, a.playlists])
+    for (const rows of [
+      a.source_videos,
+      a.categories,
+      a.clips,
+      a.playlists,
+      a.freeze_frames,
+    ])
       if (new Set(rows.map((r) => r.id)).size !== rows.length)
         problem("Entity identities must be unique");
     if (
@@ -87,12 +120,29 @@ export const analysisSchema = z
       if (playlist.clip_ids.some((id) => !clipIds.has(id)))
         problem("Playlist refers to an unknown Clip");
     }
+    const moments = new Set<string>();
+    for (const frame of a.freeze_frames) {
+      const clip = a.clips.find((c) => c.id === frame.clip_id);
+      if (!clip) problem("Freeze-frame refers to an unknown Clip");
+      else if (frame.time_ms < clip.start_ms || frame.time_ms >= clip.end_ms)
+        problem(
+          "Clip boundaries exclude a saved freeze-frame. Remove or retime that freeze-frame first.",
+        );
+      const key = `${frame.clip_id}:${frame.time_ms}`;
+      if (moments.has(key))
+        problem("A Clip cannot have two freeze-frames at the same time");
+      moments.add(key);
+      if (new Set(frame.shapes.map((s) => s.id)).size !== frame.shapes.length)
+        problem("Drawing identities must be unique");
+    }
   });
 export type Analysis = z.infer<typeof analysisSchema>;
 export type SourceVideo = z.infer<typeof sourceSchema>;
 export type Category = z.infer<typeof categorySchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type Playlist = z.infer<typeof playlistSchema>;
+export type Drawing = z.infer<typeof drawingSchema>;
+export type FreezeFrame = z.infer<typeof freezeFrameSchema>;
 export const defaults = [
   { name: "Abwehr", color: "#3B82F6" },
   { name: "Angriff", color: "#EF4444" },
@@ -107,6 +157,7 @@ export function newAnalysis(template = defaults): Analysis {
     source_videos: [],
     clips: [],
     playlists: [],
+    freeze_frames: [],
     categories: template.map((c) => ({ ...c, id: crypto.randomUUID() })),
   };
 }
@@ -122,7 +173,7 @@ export function decode(text: string): Analysis {
     );
   const envelope = z
     .object({
-      schema_version: z.union([z.literal(1), z.literal(2)]),
+      schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
       analysis: analysisSchema,
     })
     .parse(JSON.parse(text.replace(/^\uFEFF/, "")));
@@ -134,13 +185,15 @@ export function encode(a: Analysis): string {
   const validated = analysisSchema.parse(a);
   if (!validated.source_videos.length)
     throw new Error("Add a Source video before saving");
-  const { playlists, ...base } = validated;
+  const { playlists, freeze_frames, ...base } = validated;
   // Old Python versions reject v2 instead of silently dropping playlists on save.
   return (
     JSON.stringify(
-      playlists.length
-        ? { schema_version: 2, analysis: validated }
-        : { schema_version: 1, analysis: base },
+      freeze_frames.length
+        ? { schema_version: 3, analysis: validated }
+        : playlists.length
+          ? { schema_version: 2, analysis: { ...base, playlists } }
+          : { schema_version: 1, analysis: base },
       null,
       2,
     ) + "\n"
@@ -160,6 +213,9 @@ export function mutate(
   draft.playlists.forEach((p) => {
     p.clip_ids = p.clip_ids.filter((id) => !deletedIds.has(id));
   });
+  draft.freeze_frames = draft.freeze_frames.filter(
+    (f) => !deletedIds.has(f.clip_id),
+  );
   return analysisSchema.parse(draft);
 }
 export function playlistClips(a: Analysis, playlist: Playlist): Clip[] {

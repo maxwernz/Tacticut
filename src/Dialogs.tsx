@@ -225,6 +225,7 @@ export function ExportDialog({
     notes: true,
     numbers: true,
     audio: false,
+    annotations: true,
     encoder: "auto",
     height: 1080,
   });
@@ -260,7 +261,16 @@ export function ExportDialog({
                   </small>
                 </div>
                 <span className="mono">
-                  {timecode(c.end_ms - c.start_ms, false)}
+                  {timecode(
+                    c.end_ms -
+                      c.start_ms +
+                      (options.annotations
+                        ? analysis.freeze_frames
+                            .filter((f) => f.clip_id === c.id)
+                            .reduce((n, f) => n + f.hold_ms, 0)
+                        : 0),
+                    false,
+                  )}
                 </span>
                 <button
                   title="Move earlier"
@@ -293,6 +303,7 @@ export function ExportDialog({
                 ["notes", "Notes cards"],
                 ["numbers", "Clip numbers"],
                 ["audio", "Include source audio"],
+                ["annotations", "Include annotated freeze-frames"],
               ] as const
             ).map(([key, label]) => (
               <label className="checkbox-label" key={key}>

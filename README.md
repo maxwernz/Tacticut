@@ -23,6 +23,7 @@ Video Analyse TS is a TypeScript desktop rewrite of the Python/PySide/QML [Video
 - **Precise clips.** Mark in/out with `M`, then scrub, trim, and add notes on a single compact timeline.
 - **Multiple sources.** Work across several match videos in one Analysis, and relink media if it moves.
 - **Coaching playlists.** Build ordered sequences from any Clips, play them back across Source videos, and export them.
+- **Freeze-frame coaching.** Pause on key moments, draw arrows and circles, and include those holds in playback and exports.
 - **Fast native export.** FFmpeg renders 720p/1080p combined exports with title, Category, and notes cards. It shows progress and can be cancelled.
 - **Safe by design.** Saves use atomic replacement, a crash-recovery snapshot protects unsaved edits, the renderer is sandboxed, and IPC goes through a narrow preload bridge.
 - **Backward compatible.** It reads and writes the Python app's `.analysis` files and imports legacy pickle files safely.
@@ -99,6 +100,18 @@ Shortcuts are ignored while a text field or dropdown has focus. New, Open, Save 
 
 </details>
 
+<details>
+<summary><strong>Freeze-frame coaching</strong></summary>
+
+- Select a Clip, move the playhead to a frame, and click **Annotate selected Clip**. Finish or cancel any Clip draft or playlist playback first.
+- Drag to draw **arrows** and **circles/ellipses**, choose a color and thickness, and set a **0.5–15 s hold**. **New moment** adds another freeze to the same Clip. Undo/redo, Clear drawings, and Delete coaching moment only take effect when you click **Save freeze-frames**. Cancel asks before discarding changes.
+- **Review Clip with freeze-frames** and playlist playback pause on each saved hold, then resume the footage. `Space` pauses or resumes a hold, and **Continue now** skips the rest of it. Stopping, seeking, changing Clips, or opening a dialog cancels the pending auto-resume. Fullscreen presentation shows the drawings.
+- Combined export includes freeze-frames by default and is silent during each hold. Uncheck **Include annotated freeze-frames** to keep the original Clip timings. Drawings are stored in normalized picture coordinates and rasterized natively for export.
+- Drawings follow their Clip into every playlist it appears in, and deleting a Clip deletes its moments. A trim that would exclude a moment is rejected. Shapes can't be dragged after drawing, and there's no automatic player tracking yet.
+- Frame stepping uses the nominal FPS. Check converted or variable-frame-rate footage visually.
+
+</details>
+
 ## 🏗️ Architecture
 
 ```text
@@ -122,6 +135,7 @@ Shortcuts are ignored while a text field or dropdown has focus. New, Open, Save 
 | Native menus and dialogs, restricted IPC, media streaming | `electron/main.ts`, `electron/preload.ts` |
 | Atomic persistence, relative paths, media fingerprints | `electron/files.ts`                       |
 | Probing and codec fallback copies                      | `electron/media.ts`                       |
+| Freeze-frame model, editor, canvas, export rasterizing | `src/annotations.ts`, `src/AnnotationEditor.tsx`, `src/AnnotationCanvas.tsx`, `electron/annotations.ts` |
 | Legacy pickle import                                   | `electron/legacy.ts`                      |
 | Export preflight, rendering, cancellation              | `electron/export.ts`                      |
 
@@ -141,10 +155,11 @@ Shortcuts are ignored while a text field or dropdown has focus. New, Open, Save 
 | ------ | ----------------------------- | --------------------------- |
 | v1     | Analysis has no playlists     | Python app and this app     |
 | v2     | Analysis contains playlists   | This app only               |
+| v3     | Clips have freeze-frames      | This app (annotation build) |
 
 - `.analysis` files are JSON. The app keeps UUIDs, Clip creation order, Categories, notes, and external Source-video references intact. It uses the Python app's three-region SHA-256 media fingerprint.
 - Relative Source-video paths let you move the media folder together with the Analysis. You can relink missing media without losing Clips.
-- Older apps reject v2 files instead of silently dropping playlists. To keep a copy the Python app can open, use **Save As** before adding playlists.
+- Older apps reject v2 and v3 files instead of silently dropping playlists or drawings. To keep a copy they can open, use **Save As** first. If you remove all freeze-frames, later saves go back to v2 or v1.
 - Saves check for external changes first. After an abnormal exit, the app offers a debounced recovery snapshot on the next launch.
 - **Legacy pickle files** (`treewidget_item.ClipItem`) are imported with a restricted, data-only reader. It never imports Python globals or runs constructors. Files are limited to 32 MiB, and you must Save As to a new JSON file.
 

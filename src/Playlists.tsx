@@ -61,6 +61,12 @@ export function Playlists({
     return () => onModal(false);
   }, [adding, deleting, onModal]);
   const clips = playlist ? playlistClips(analysis, playlist) : [];
+  const presentationDuration = (clip: Clip) =>
+    clip.end_ms -
+    clip.start_ms +
+    analysis.freeze_frames
+      .filter((f) => f.clip_id === clip.id)
+      .reduce((n, f) => n + f.hold_ms, 0);
   const update = (edit: (p: Playlist) => void) => {
     if (playlist)
       change((a) => {
@@ -150,7 +156,7 @@ export function Playlists({
             <span className="muted">
               {clips.length} Clips ·{" "}
               {timecode(
-                clips.reduce((sum, c) => sum + c.end_ms - c.start_ms, 0),
+                clips.reduce((sum, c) => sum + presentationDuration(c), 0),
                 false,
               )}
             </span>
@@ -216,7 +222,7 @@ export function Playlists({
                   <span>
                     <strong>{clip.name}</strong>
                     <small>
-                      {timecode(clip.end_ms - clip.start_ms, false)} ·{" "}
+                      {timecode(presentationDuration(clip), false)} ·{" "}
                       {
                         analysis.source_videos.find(
                           (s) => s.id === clip.source_video_id,
@@ -289,8 +295,8 @@ export function Playlists({
             </button>
           </div>
           <p className="playlist-format-note">
-            Playlists use the TS file format (v2). Older Python versions cannot
-            open files containing playlists.
+            Playlists require TS format v2; annotations require v3. Older Python
+            versions cannot open these files.
           </p>
         </>
       )}

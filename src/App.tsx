@@ -33,8 +33,10 @@ import {
   type Clip,
   type SourceVideo,
   type Playlist,
+  type FreezeFrame,
 } from "./domain";
-import type { ExportOptions, Loaded, Progress } from "./api";
+import type { ExportOptions, Loaded, Progress, Media } from "./api";
+import { AnnotationEditor } from "./AnnotationEditor";
 import { Player, type PlayerHandle } from "./Player";
 import { ClipEditor } from "./ClipEditor";
 import { Select } from "./Select";
@@ -47,6 +49,11 @@ type Confirm = {
   resolve(value: number): void;
 };
 export function App() {
+  const [annotationSession, setAnnotationSession] = useState<{
+    clip: Clip;
+    time: number;
+    media: Media;
+  } | null>(null);
   const [captureSettings, setCaptureSettings] = useState(false);
   const [captureWindow, setCaptureWindow] = useState(() => {
     try {
@@ -108,6 +115,7 @@ export function App() {
     clips: Clip[];
     index: number;
     token: number;
+    freezeFrames: FreezeFrame[];
   };
   const [queue, setQueue] = useState<Queue | null>(null);
   const queueRef = useRef(queue),
@@ -115,7 +123,13 @@ export function App() {
   queueRef.current = queue;
   const sequence = useMemo(
     () =>
-      queue ? { token: queue.token, clip: queue.clips[queue.index] } : null,
+      queue
+        ? {
+            token: queue.token,
+            clip: queue.clips[queue.index],
+            freezeFrames: queue.freezeFrames,
+          }
+        : null,
     [queue],
   );
   function stopPlaylist() {
@@ -138,6 +152,7 @@ export function App() {
       clips,
       index,
       token: ++queueToken.current,
+      freezeFrames: analysis.freeze_frames,
     };
     queueRef.current = next;
     setQueue(next);
@@ -150,7 +165,11 @@ export function App() {
     const index = current.index + 1;
     if (index === current.clips.length) {
       stopPlaylist();
-      setNotice("Playlist finished");
+      setNotice(
+        current.playlistId === "clip-review"
+          ? "Clip review finished"
+          : "Playlist finished",
+      );
       return;
     }
     const next = { ...current, index, token: ++queueToken.current };
@@ -265,6 +284,7 @@ export function App() {
       exportClips ||
       captureSettings ||
       playlistModal ||
+      annotationSession ||
       rename
     )
       stopPlaylist();
@@ -274,6 +294,7 @@ export function App() {
     exportClips,
     captureSettings,
     playlistModal,
+    annotationSession,
     rename,
   ]);
   useEffect(() => {
@@ -487,6 +508,7 @@ export function App() {
       rename ||
       exportClips ||
       playlistModal ||
+      annotationSession ||
       captureSettings
     )
       return;
@@ -551,6 +573,7 @@ export function App() {
         rename ||
         captureSettings ||
         playlistModal ||
+        annotationSession ||
         (e.target instanceof Element &&
           e.target.closest(
             "input,textarea,select,[role=dialog],[role=combobox],[data-popup],[contenteditable=true]",
@@ -703,7 +726,14 @@ export function App() {
       }}
       onDrop={(e) => {
         e.preventDefault();
-        if (!busy && ready && !confirmation && !exportClips) {
+        if (
+          !busy &&
+          ready &&
+          !confirmation &&
+          !exportClips &&
+          !annotationSession &&
+          !playlistModal
+        ) {
           const paths = window.desktop.filePaths(
             Array.from(e.dataTransfer.files),
           );
@@ -1197,6 +1227,18 @@ export function App() {
           navigation={navigation}
           onSelect={setSelected}
           onEdit={(c) => void editClip(c)}
+          onAnnotate={(clip, time, media) => {
+            stopPlaylist();
+            player.current?.stopPreview();
+            setAnnotationSession({ clip, time, media });
+          }}
+          onReview={(clip) =>
+            playPlaylist({
+              id: "clip-review",
+              name: clip.name,
+              clip_ids: [clip.id],
+            })
+          }
           onMark={mark}
           captureDisabled={!!draft || !!queue}
           onQuickTag={quickTag}
@@ -1251,6 +1293,36 @@ export function App() {
             </button>
           )}
         </div>
+      )}
+      {annotationSession && (
+        <AnnotationEditor
+          clip={annotationSession.clip}
+          media={annotationSession.media}
+          time={annotationSession.time}
+          initial={analysis.freeze_frames.filter(
+            (f) => f.clip_id === annotationSession.clip.id,
+          )}
+          onClose={() => setAnnotationSession(null)}
+          onSave={(frames) => {
+            try {
+              const updated = mutate(latest.current.analysis, (a) => {
+                a.freeze_frames = [
+                  ...a.freeze_frames.filter(
+                    (f) => f.clip_id !== annotationSession.clip.id,
+                  ),
+                  ...frames,
+                ];
+              });
+              setAnalysis(updated);
+              setAnnotationSession(null);
+              setNotice(
+                "Freeze-frames saved to Analysis; save the file to keep your changes.",
+              );
+            } catch (e) {
+              fail(e);
+            }
+          }}
+        />
       )}
       {captureSettings && (
         <Modal title="Quick capture" onClose={() => setCaptureSettings(false)}>

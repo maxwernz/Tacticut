@@ -20,11 +20,15 @@ import {
   Pencil,
   RotateCcw,
   RotateCw,
+  CircleArrowRight,
+  ScanLine,
+  Square,
 } from "lucide-react";
 import type { Category, Clip, SourceVideo } from "./domain";
 import { timecode } from "./domain";
 import type { Media } from "./api";
 import { Select } from "./Select";
+import { AnnotationCanvas } from "./AnnotationCanvas";
 import {
   useSequencePlayback,
   type SequenceRequest,
@@ -55,6 +59,8 @@ type Props = {
   navigation: { ms: number; revision: number };
   onSelect(id: string): void;
   onEdit(clip: Clip): void;
+  onAnnotate(clip: Clip, time: number, media: Media): void;
+  onReview(clip: Clip): void;
   onMark(): void;
   captureDisabled: boolean;
   onQuickTag(categoryId: string): void;
@@ -66,6 +72,7 @@ type Props = {
 };
 export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
   const video = useRef<HTMLVideoElement>(null),
+    stage = useRef<HTMLDivElement>(null),
     timeline = useRef<HTMLDivElement>(null),
     head = useRef<HTMLDivElement>(null),
     clock = useRef<HTMLElement>(null),
@@ -78,6 +85,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
     [volume, setVolume] = useState(0.8),
     [muted, setMuted] = useState(false),
     [proxy, setProxy] = useState(false);
+  const [videoSize, setVideoSize] = useState({ width: 16, height: 9 });
   const seekTarget = useRef(0),
     resume = useRef(false),
     scrubFrame = useRef(0),
@@ -97,6 +105,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
       video.current.currentTime = seekTarget.current / 1000;
   };
   const toggle = () => {
+    if (sequencePlayback.toggleHold()) return;
     const v = video.current;
     if (!v || !media || loading) return;
     if (v.paused) void v.play().catch((e) => p.onError(String(e)));
@@ -181,7 +190,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
       cancelled = true;
     };
   }, [p.source?.id, p.source?.location, p.documentPath, proxy]);
-  useSequencePlayback(
+  const sequencePlayback = useSequencePlayback(
     video,
     p.sequence,
     !!media &&
@@ -276,7 +285,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
   const activeClip = p.clips.find((c) => c.id === p.selected);
   return (
     <section className="player-panel">
-      <div className="stage">
+      <div className="stage" ref={stage}>
         {media && (
           <video
             ref={video}
@@ -287,6 +296,11 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onLoadedMetadata={() => {
+              if (video.current)
+                setVideoSize({
+                  width: video.current.videoWidth || media.width,
+                  height: video.current.videoHeight || media.height,
+                });
               if (!p.sequence) seek(seekTarget.current);
             }}
             onError={() =>
@@ -295,6 +309,23 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
               )
             }
           />
+        )}
+        {sequencePlayback.freeze && (
+          <>
+            <AnnotationCanvas
+              shapes={sequencePlayback.freeze.shapes}
+              videoWidth={videoSize.width}
+              videoHeight={videoSize.height}
+            />
+            <div className="freeze-playback-label">
+              <span>
+                {sequencePlayback.holdPaused
+                  ? "Coaching freeze · paused"
+                  : "Coaching freeze"}
+              </span>
+              <button onClick={sequencePlayback.skipHold}>Continue now</button>
+            </div>
+          </>
         )}
         {!p.source && (
           <div className="empty-stage">
@@ -462,7 +493,8 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             disabled={!media}
             onClick={toggle}
           >
-            {playing ? (
+            {playing ||
+            (sequencePlayback.freeze && !sequencePlayback.holdPaused) ? (
               <Pause size={21} fill="currentColor" />
             ) : (
               <Play size={21} fill="currentColor" />
@@ -493,6 +525,43 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
           </button>
         </div>
         <div className="play-settings">
+          {p.sequence && (
+            <button title="Stop Clip review" onClick={p.onSequenceCancel}>
+              <Square size={14} />
+            </button>
+          )}
+          {activeClip && (
+            <>
+              <button
+                title="Review Clip with freeze-frames"
+                disabled={p.captureDisabled || !media}
+                onClick={() => p.onReview(activeClip)}
+              >
+                <CircleArrowRight size={16} />
+              </button>
+              <button
+                title="Annotate selected Clip"
+                disabled={
+                  p.captureDisabled ||
+                  !media ||
+                  loading ||
+                  !!failure ||
+                  p.pending !== null
+                }
+                onClick={() => {
+                  if (!media || !video.current || video.current.seeking) return;
+                  video.current.pause();
+                  p.onAnnotate(
+                    activeClip,
+                    Math.round(video.current.currentTime * 1000),
+                    media,
+                  );
+                }}
+              >
+                <ScanLine size={16} />
+              </button>
+            </>
+          )}
           {activeClip && (
             <button
               title="Edit selected Clip"
@@ -563,7 +632,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
           <button
             title="Fullscreen video"
             disabled={!media}
-            onClick={() => void video.current?.requestFullscreen()}
+            onClick={() => void stage.current?.requestFullscreen()}
           >
             <Maximize size={16} />
           </button>

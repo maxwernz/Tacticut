@@ -87,14 +87,55 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
     }, analysis);
     await page.getByTitle("Save Analysis").click();
-    await expect(
-      page.locator(".statusbar").getByText("Saved", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("status")).toContainText("Analysis saved");
     const saved = JSON.parse(await readFile(analysis, "utf8"));
     expect(saved.schema_version).toBe(1);
     expect(saved.analysis.clips[0].name).toBe("Fast break");
     expect(saved.analysis.clips[0].start_ms).toBe(1000);
     expect(saved.analysis.clips[0].end_ms).toBe(3000);
+    await page.getByTitle("Annotate selected Clip").click();
+    const annotation = page.getByRole("dialog", {
+      name: "Freeze-frames · Fast break",
+    });
+    await annotation.getByTitle("Next annotation frame").click();
+    await expect(annotation.locator(".annotation-loading")).toHaveCount(0);
+    const canvas = annotation.getByRole("img", {
+      name: "Draw on frozen video",
+    });
+    const box = (await canvas.boundingBox())!;
+    const draw = async (x1: number, y1: number, x2: number, y2: number) => {
+      await page.mouse.move(box.x + x1 * box.width, box.y + y1 * box.height);
+      await page.mouse.down();
+      await page.mouse.move(box.x + x2 * box.width, box.y + y2 * box.height, {
+        steps: 6,
+      });
+      await page.mouse.up();
+    };
+    await draw(0.2, 0.5, 0.8, 0.5);
+    await annotation
+      .getByRole("button", { name: "Circle", exact: true })
+      .click();
+    await draw(0.2, 0.2, 0.4, 0.4);
+    await expect(canvas.locator("g")).toHaveCount(2);
+    await page.screenshot({ path: "test-results/freeze-frame-editor.png" });
+    await annotation
+      .getByRole("button", { name: "Save freeze-frames" })
+      .click();
+    await expect(annotation).toHaveCount(0);
+    await page.getByTitle("Save Analysis").click();
+    await expect
+      .poll(
+        async () => JSON.parse(await readFile(analysis, "utf8")).schema_version,
+      )
+      .toBe(3);
+    expect(
+      JSON.parse(await readFile(analysis, "utf8")).analysis.freeze_frames[0]
+        .shapes,
+    ).toHaveLength(2);
+    await page.getByTitle("Review Clip with freeze-frames").click();
+    await expect(page.locator(".freeze-playback-label")).toBeVisible();
+    await page.getByRole("button", { name: "Continue now" }).click();
+    await expect(page.locator(".freeze-playback-label")).toHaveCount(0);
     await page.getByTitle("Manage Categories").click();
     await page.getByLabel("Category name").nth(1).fill("Attack");
     await page.getByRole("button", { name: "Save Categories" }).click();
@@ -126,9 +167,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
       "Fast break",
     );
     await recovered.getByTitle("Save Analysis").click();
-    await expect(
-      recovered.locator(".statusbar").getByText("Saved", { exact: true }),
-    ).toBeVisible();
+    await expect(recovered.getByRole("status")).toContainText("Analysis saved");
   } finally {
     if (app) await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
     await rm(dir, { recursive: true, force: true });

@@ -111,3 +111,48 @@ it("preserves coaching playlists through atomic save, load and crash recovery", 
     recoveryPayload(JSON.parse(JSON.stringify(saved))).analysis.playlists,
   ).toEqual(a.playlists);
 });
+it("preserves freeze-frame drawings in files and recovery snapshots", async () => {
+  const { dir, a } = await setup();
+  a.clips = [
+    {
+      id: crypto.randomUUID(),
+      source_video_id: a.source_videos[0].id,
+      name: "Moment",
+      start_ms: 0,
+      end_ms: 1000,
+      category_id: null,
+      notes: "",
+      creation_order: 0,
+    },
+  ];
+  a.freeze_frames = [
+    {
+      id: crypto.randomUUID(),
+      clip_id: a.clips[0].id,
+      time_ms: 500,
+      hold_ms: 2000,
+      shapes: [
+        {
+          id: crypto.randomUUID(),
+          kind: "circle",
+          x1: 0.2,
+          y1: 0.2,
+          x2: 0.4,
+          y2: 0.4,
+          color: "#FFFFFF",
+          width: 0.006,
+        },
+      ],
+    },
+  ];
+  const saved = await saveDocument(
+    { analysis: a, path: null, stamp: null },
+    join(dir, "annotated.analysis"),
+  );
+  expect((await load(saved.path!)).analysis.freeze_frames).toEqual(
+    a.freeze_frames,
+  );
+  expect(
+    recoveryPayload(JSON.parse(JSON.stringify(saved))).analysis.freeze_frames,
+  ).toEqual(a.freeze_frames);
+});

@@ -16,6 +16,7 @@
     "package:win": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
     "lucide-react": "^0.468.0",
@@ -51,6 +52,7 @@
       "package.json"
     ],
     "asarUnpack": [
+      "node_modules/@resvg/**/*",
       "node_modules/ffmpeg-static/**/*",
       "node_modules/ffprobe-static/**/*"
     ],

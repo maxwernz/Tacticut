@@ -22,6 +22,9 @@ Visual thesis: a dark, compact editing workspace, using the original pink accent
 
 ## Intentional differences and unfinished parity
 
+- Freeze-frame annotations are isolated on `feature/freeze-frame-annotations` (baseline `479d7d1` on main). `src/AnnotationEditor.tsx` holds cancellable local edits; `src/AnnotationCanvas.tsx` and `src/annotations.ts` share normalized geometry with export. Saved moments are Clip-ID references in schema v3. Files without moments retain v1/v2 encoding. Clips cannot be trimmed across saved moments; deletion cleans up their references.
+- Clip review and playlists insert pauseable timed holds; ordinary Source playback remains unchanged. Holds add duration and silence in exported video. Export decodes a still, normalizes pixel aspect ratio, rasterizes only generated vector primitives using [resvg](https://github.com/thx/resvg-js), and composes it through the native [FFmpeg filter pipeline](https://ffmpeg.org/ffmpeg-filters.html). Rasterization inputs contain no imported SVG, external URLs or user-supplied font references. Browser-decoded timestamps are retained when available; nominal-FPS stepping and converted/VFR footage are not a guarantee of native frame-index equivalence.
+
 - Coaching playlists are a TS extension: `src/Playlists.tsx` provides named, ordered Clip references and `src/useSequencePlayback.ts` runs cancellable bounded playback requests across media loads. Playlist files use schema v2 so older apps cannot silently strip them; playlist-free files remain schema v1. Export reuses the native pipeline with playlist order supplied explicitly. Source transitions may buffer; this is not a gapless multi-video player.
 
 - The interface uses English labels, with the original handball Category defaults (`Abwehr`, `Angriff`, `Tor`). Pixel-perfect QML replication was not the objective.
@@ -34,6 +37,8 @@ Visual thesis: a dark, compact editing workspace, using the original pink accent
 - The sidebar currently renders all matching rows. Very large analyses (thousands of Clips) should be benchmarked and may warrant virtualized rows.
 
 ## Validation boundaries
+
+Annotation validation includes pointer-driven draw/undo/redo/save/cancel, normalized geometry, v3 round trips and crash recovery, invalid primitive rejection, boundary-edit protection, timer pause/resume/cancellation, and a real native 4:3-to-16:9 export. Pixel samples verify arrow/circle positions and black bars; audio samples verify the inserted hold is silent; a disabled-annotations export verifies original duration. An exported synthetic frame was visually inspected. The Electron workflow now also draws both shapes, saves v3, and exercises a presentation hold; this native UI test still needs an unrestricted macOS/Windows runner, as explained below.
 
 Automated Node tests exercise schema invariants, transactional failure, relative media resolution, external-change detection, sampled fingerprints, real native export/decoding, output preservation on cancellation, and the React import/edit/save/recovery/export flows with a mocked desktop bridge.
 

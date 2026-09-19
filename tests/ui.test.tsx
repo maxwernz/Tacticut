@@ -306,6 +306,49 @@ it("does not restart after stopping during a source load", async () => {
   );
   expect(screen.queryByRole("button", { name: "Stop playlist" })).toBeNull();
 });
+it("opens the annotation editor from the player and saves its drawings with the Analysis", async () => {
+  await openPlaylistFixture(false);
+  fireEvent.click(screen.getByRole("button", { name: "Clips 3" }));
+  fireEvent.click(screen.getByText("Attack"));
+  await screen.findByTitle("Annotate selected Clip");
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  SVGElement.prototype.setPointerCapture = vi.fn();
+  SVGElement.prototype.hasPointerCapture = () => false;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    x: 0,
+    y: 0,
+    width: 640,
+    height: 360,
+    right: 640,
+    bottom: 360,
+    toJSON: () => ({}),
+  });
+  fireEvent.click(screen.getByTitle("Annotate selected Clip"));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Freeze-frames · Attack",
+  });
+  const svg = within(dialog).getByRole("img", { name: "Draw on frozen video" });
+  fireEvent.pointerDown(svg, { button: 0, clientX: 128, clientY: 180 });
+  fireEvent.pointerUp(svg, { clientX: 512, clientY: 180 });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Save freeze-frames" }),
+  );
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved?.analysis.freeze_frames).toHaveLength(1));
+  expect(saved!.analysis.freeze_frames[0].shapes[0]).toMatchObject({
+    kind: "arrow",
+    x1: 0.2,
+    y1: 0.5,
+    x2: 0.8,
+    y2: 0.5,
+  });
+  expect(saved!.analysis.freeze_frames[0].clip_id).toBe(
+    saved!.analysis.clips[0].id,
+  );
+  vi.unstubAllGlobals();
+});
 it("adds the batch selection to a new playlist without duplicating clips", async () => {
   const a = await openPlaylistFixture(false);
   fireEvent.click(screen.getByRole("button", { name: "Clips 3" }));

@@ -11,7 +11,9 @@ import { join, dirname, basename, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { analysisSchema } from "../src/domain";
+import { analysisSchema, type FreezeFrame } from "../src/domain";
+import { clipPresentation } from "../src/annotations";
+import { renderFreezeFrame } from "./annotations";
 import type { Loaded, ExportOptions, Progress } from "../src/api";
 import { resolveSource } from "./files";
 import { ffmpeg, run, probe } from "./media";
@@ -24,6 +26,7 @@ export const exportSchema = z.object({
   audio: z.boolean(),
   encoder: z.enum(["auto", "software"]),
   height: z.union([z.literal(720), z.literal(1080)]),
+  annotations: z.boolean().default(true),
 });
 export async function renderExport(
   data: Loaded,
@@ -82,6 +85,7 @@ export async function renderExport(
     start?: number;
     number?: string;
     audio?: boolean;
+    freeze?: FreezeFrame;
   };
   const segments: Segment[] = [];
   if (options.title)
@@ -98,13 +102,18 @@ export async function renderExport(
     lastCategory = clip.category_id;
     if (options.notes && clip.notes.trim())
       segments.push({ duration: 2, text: clip.notes });
-    segments.push({
-      path: paths.get(clip.source_video_id),
-      start: clip.start_ms / 1000,
-      duration: (clip.end_ms - clip.start_ms) / 1000,
-      number: options.numbers ? String(i + 1) : undefined,
-      audio: metadata.get(clip.source_video_id)!.audio,
-    });
+    for (const part of clipPresentation(
+      clip,
+      options.annotations ? a.freeze_frames : [],
+    ))
+      segments.push({
+        path: paths.get(clip.source_video_id),
+        start: part.start_ms / 1000,
+        duration: part.duration_ms / 1000,
+        number: options.numbers ? String(i + 1) : undefined,
+        audio: !part.freeze && metadata.get(clip.source_video_id)!.audio,
+        freeze: part.freeze,
+      });
   });
   const total = segments.reduce((n, s) => n + s.duration, 0);
   let done = 0;
@@ -115,7 +124,22 @@ export async function renderExport(
       if (signal.aborted) throw new Error("Export cancelled");
       const s = segments[i];
       const args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y"];
-      if (s.path) args.push("-ss", String(s.start), "-i", s.path);
+      if (s.freeze) {
+        progress({
+          percent: Math.min(98, (done / total) * 98),
+          message: `Drawing freeze-frame ${i + 1} of ${segments.length}`,
+        });
+        const still = await renderFreezeFrame(
+          s.path!,
+          s.freeze,
+          work,
+          i,
+          w,
+          h,
+          signal,
+        );
+        args.push("-loop", "1", "-framerate", "30", "-i", still);
+      } else if (s.path) args.push("-ss", String(s.start), "-i", s.path);
       else args.push("-f", "lavfi", "-i", `color=c=0x353333:s=${w}x${h}:r=30`);
       if (options.audio && (!s.path || !s.audio))
         args.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");

@@ -14,6 +14,7 @@ export type Loaded = {
   legacyPath?: string | null;
 };
 export type ExportOptions = {
+  annotations?: boolean;
   ids: string[];
   title: boolean;
   categories: boolean;

@@ -17,6 +17,10 @@
 
 Video Analyse TS is a TypeScript desktop rewrite of the Python/PySide/QML [Video Analyse](https://github.com/maxwernz/Video-Analyse) app. Electron provides the desktop shell, React renders the workspace, and native FFmpeg processes do the video work. You don't need Python installed.
 
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="Video Analyse TS workspace: Clips grouped by Category in the sidebar, the match video, and a colour-coded Clip timeline" width="900">
+</p>
+
 ## ✨ Highlights
 
 - **Live tagging.** Press `1`–`9` during playback to capture a Clip in a Category without pausing.
@@ -27,6 +31,23 @@ Video Analyse TS is a TypeScript desktop rewrite of the Python/PySide/QML [Video
 - **Fast native export.** FFmpeg renders 720p/1080p combined exports with title, Category, and notes cards. It shows progress and can be cancelled.
 - **Safe by design.** Saves use atomic replacement, a crash-recovery snapshot protects unsaved edits, the renderer is sandboxed, and IPC goes through a narrow preload bridge.
 - **Backward compatible.** It reads and writes the Python app's `.analysis` files and imports legacy pickle files safely.
+
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/playlists.png" alt="Playlists tab with an ordered coaching sequence"></td>
+    <td width="33%"><img src="docs/screenshots/freeze-frames.png" alt="Freeze-frame editor with arrows and a circle drawn over the pitch"></td>
+    <td width="33%"><img src="docs/screenshots/export.png" alt="Combined export dialog with Clip order, title cards, and resolution options"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Coaching playlists</strong></td>
+    <td align="center"><strong>Freeze-frame annotations</strong></td>
+    <td align="center"><strong>Combined export</strong></td>
+  </tr>
+</table>
+
+<sub>The screenshots use a synthetic demo video.</sub>
 
 ## 🚀 Getting started
 

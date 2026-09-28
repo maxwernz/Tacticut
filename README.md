@@ -1,73 +1,166 @@
-# Video Analyse TS
+<div align="center">
 
-A TypeScript desktop rewrite of the Python/PySide/QML Video Analyse app. Electron runs the desktop shell, React renders the workspace, and native FFmpeg processes handle video work. No Python installation is needed.
+# 🎬 Video Analyse TS
 
-## Run
+**Cross-platform sports video analysis for coaches: tag, trim, sequence, and export match footage.**
 
-Use Node.js 22.12+ (Node 24 recommended):
+[![Desktop checks and packages](https://github.com/maxwernz/VideoAnalyseTS/actions/workflows/desktop.yml/badge.svg)](https://github.com/maxwernz/VideoAnalyseTS/actions/workflows/desktop.yml)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
+![Electron](https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-native-007808?logo=ffmpeg&logoColor=white)
+
+</div>
+
+---
+
+Video Analyse TS is a TypeScript desktop rewrite of the Python/PySide/QML [Video Analyse](https://github.com/maxwernz/Video-Analyse) app. Electron provides the desktop shell, React renders the workspace, and native FFmpeg processes do the video work. You don't need Python installed.
+
+## ✨ Highlights
+
+- **Live tagging.** Press `1`–`9` during playback to capture a Clip in a Category without pausing.
+- **Precise clips.** Mark in/out with `M`, then scrub, trim, and add notes on a single compact timeline.
+- **Multiple sources.** Work across several match videos in one Analysis, and relink media if it moves.
+- **Coaching playlists.** Build ordered sequences from any Clips, play them back across Source videos, and export them.
+- **Fast native export.** FFmpeg renders 720p/1080p combined exports with title, Category, and notes cards. It shows progress and can be cancelled.
+- **Safe by design.** Saves use atomic replacement, a crash-recovery snapshot protects unsaved edits, the renderer is sandboxed, and IPC goes through a narrow preload bridge.
+- **Backward compatible.** It reads and writes the Python app's `.analysis` files and imports legacy pickle files safely.
+
+## 🚀 Getting started
+
+Requires **Node.js 22.12+** (Node 24 recommended).
 
 ```sh
-npm ci
-npm run dev
+npm ci        # installs dependencies, including native FFmpeg/ffprobe binaries
+npm run dev   # launches the app with hot reload
 ```
 
-For the production build:
+Production build:
 
 ```sh
 npm run build
 npm start
 ```
 
-Dependencies include native FFmpeg and ffprobe binaries. Installation needs internet access; the installed app processes media locally. The renderer is sandboxed, has no Node access, and communicates through a narrow preload interface. Native dialogs choose files; a token-based streaming protocol serves video with byte-range support.
+Installing needs internet access. After that, the app processes all media locally.
 
-## Workflow
+## ⌨️ Keyboard shortcuts
 
-- Add or drop one or more Source videos. The Videos tab switches, renames, reorders, removes, and relinks them.
-- Press **Space** to play/pause, **Left/Right** for frame-sized steps, **Shift+Left/Right** for five-second jumps, and **Up/Down** to increase/decrease playback speed. Shortcuts leave text fields and dropdowns alone. Playback speed and volume live below the video.
-- Choose **Select clips** to reveal batch-selection checkboxes for export or deletion. **Done** or **Escape** hides them and clears the batch selection; normal clip browsing stays uncluttered.
-- Press **M** to mark the start and again to mark the end. Save the resulting Clip draft with its name, Category, boundaries, and notes. Cancelling a draft leaves the Analysis unchanged.
-- In parallel, press **1–9** to immediately capture a Clip in that Category (in sidebar Category order), or use the **Tag** menu. Default context is 8 seconds before and 3 seconds after the playhead; the settings button beside Tag changes these device-local values. Capture does not pause playback or disturb a pending manual start, ignores held-key repeats, and clamps to video boundaries. Finish or cancel an open Clip draft before quick tagging. Captures are ordinary Clips, included in recovery and saved/exported through the existing workflow.
-- Capture, Tag, and selected-Clip editing now share the playback control row. Shortcut explanations remain in tooltips instead of a permanent bottom strip.
-- Click a Clip to navigate to its Source video and start. Double-click or use its pencil button to edit it. The timeline scrubs, selects ranges, and double-clicks to a Clip start.
-- Filter Clips by Source video and search names, notes, Categories, and Source-video names. Sort by Category, start, or creation order. Check Clips to export or delete a selection.
-- Manage Analysis-wide Categories with the sidebar settings button. The Analysis menu also edits the reusable Category template.
-- Save with **Cmd/Ctrl+S**. New, Open, Save As, Add Source videos, and Combined export also have native menu shortcuts.
-- Export selected Clips (or all Clips if none are selected), rearrange their independent Export list, and choose title/Category/notes cards, Clip numbers, source audio, and 720p or 1080p output.
-- Use **Playlists** to create a named coaching sequence. **Add Clips** searches existing Clips; the arrows set presentation order and the × removes only the playlist reference. A Clip can belong to several playlists, but appears only once within each. Batch selections can also be added using the playlist button beside Delete.
-- **Play playlist** plays each Clip's interval in order, switching Source videos as needed; click a playlist row to start there. Space pauses/resumes; Stop or Escape ends the sequence. Manual seeking, document edits and dialogs cancel sequence playback. Finish or cancel unfinished capture before playing a playlist. Switching Source videos may briefly buffer; playback is not gapless. **Export playlist** uses that same order in the existing export dialog.
+| Key                         | Action                                                 |
+| --------------------------- | ------------------------------------------------------ |
+| `Space`                     | Play / pause (also pauses/resumes playlist sequences)  |
+| `←` / `→`                   | Step one frame                                         |
+| `Shift` + `←` / `→`         | Jump five seconds                                      |
+| `↑` / `↓`                   | Increase / decrease playback speed                     |
+| `M`                         | Mark Clip start, then press again to mark the end      |
+| `1`–`9`                     | Quick-capture a Clip in that Category (sidebar order)  |
+| `Esc`                       | Leave batch selection / stop playlist playback         |
+| `Cmd/Ctrl` + `S`            | Save                                                   |
 
-## Compatibility
+Shortcuts are ignored while a text field or dropdown has focus. New, Open, Save As, Add Source videos, and Combined export are also in the native menus.
 
-The app reads and writes the Python app's schema-version-1 JSON `.analysis` files, preserving UUIDs, Clip creation order, Categories, notes, and external Source-video references. It uses the same three-region SHA-256 media fingerprint algorithm. Relative Source-video paths support moving media together with the Analysis. Missing media can be relinked without losing Clips; replacement footage requires a confirmation.
+## 🧭 Workflow
 
-Analyses containing playlists save as **schema version 2**, with named, ordered Clip-ID references stored in the same file and recovery snapshot. These files require this TS version; older Python/TS apps reject them rather than silently losing playlists. Use **Save As** to keep an original Python-compatible copy. Analyses without playlists continue to save as version 1. Deleting a Clip or Source video removes its references from all playlists; removing a playlist never deletes the underlying Clips.
+<details>
+<summary><strong>Sources and playback</strong></summary>
 
-Saving uses atomic replacement and checks for external file changes. Unsaved durable edits create a separate debounced recovery snapshot, offered on the next launch after an abnormal exit. Pending boundaries and unsaved Clip drafts are transient, as in the Python app.
+- Add Source videos with the button or by dragging them onto the window. Use the **Videos** tab to switch, rename, reorder, remove, and relink them.
+- Playback speed and volume controls sit below the video. The timeline scrubs, selects ranges, and jumps to a Clip's start when you double-click it.
 
-**Legacy pickle files:** the historical `treewidget_item.ClipItem` format can be imported directly using a restricted data-only reader. It never imports Python globals or executes constructors/reducers. Conversion requires Save As to a new JSON file; the original remains intact. Unrecognized pickle forms are rejected and can instead be converted using the Python app. Imports are limited to 32 MiB.
+</details>
 
-## Performance choices
+<details>
+<summary><strong>Creating and editing Clips</strong></summary>
 
-- FFmpeg decodes/encodes/composes natively; frames never pass through JavaScript or React.
-- Export runs in asynchronous child processes, with progress and cancellation. It normalizes clips into temporary segments and stream-copies the final concatenation. This bounds memory usage, at the cost of temporary disk space.
-- On macOS, Automatic export attempts VideoToolbox hardware encoding and falls back to software. Windows currently uses the `veryfast` software H.264 encoder. No claim of a measured speedup over the Python app is made yet.
-- The playhead updates directly in the DOM while playing; it does not rerender the Clip list. Scrubbing is coalesced to animation frames. Idle playback does not run a continuous animation loop.
-- Source identity checks read at most three 64 KiB regions instead of hashing an entire match recording.
-- Unsupported playback codecs can be converted on demand into a cached 720p H.264/AAC playback copy. Exports still use the original media. Cache files live under the app's local user-data directory; there is no automatic cache-size limit yet.
+- Press **M** to mark a start and again to mark the end. Then save the Clip draft with a name, Category, boundaries, and notes. Cancelling a draft leaves the Analysis unchanged.
+- Quick capture (`1`–`9` or the **Tag** menu) uses 8 s of context before the playhead and 3 s after it by default. Change this per device with the settings button beside Tag. Quick capture doesn't pause playback or disturb a pending manual start. It ignores held-key repeats and clamps clips to the video's boundaries.
+- Click a Clip to jump to it. Double-click it or use the pencil button to edit.
+- Filter Clips by Source video, search names, notes, and Categories, and sort by Category, start time, or creation order.
+- **Select clips** shows checkboxes for batch export, deletion, or adding to a playlist.
+- Manage Categories with the sidebar settings button. The Analysis menu edits the reusable Category template.
 
-TypeScript is appropriate for this application's editing and document logic. Native code is still responsible for the expensive media operations. Electron has a larger RAM and application-size cost than Qt or Tauri; a TypeScript rewrite by itself is not a performance improvement.
+</details>
 
-## Checks and packaging
+<details>
+<summary><strong>Playlists</strong></summary>
 
-```sh
-npm test               # domain, persistence, React workflows, actual FFmpeg exports
-npm run test:e2e       # builds and launches Electron via Playwright
-npm run package:mac   # run on ARM64 macOS
-npm run package:win   # run on x64 Windows
+- Create named coaching sequences. **Add Clips** searches existing Clips, the arrows reorder them, and × removes only the playlist reference. A Clip can belong to several playlists but appears only once in each.
+- **Play playlist** plays each Clip in order and switches Source videos as needed. Click a row to start from that Clip. Seeking, editing, or opening dialogs cancels the sequence. Switching sources may briefly buffer, so playback isn't gapless.
+- **Export playlist** opens the export dialog with the Clips in playlist order.
+
+</details>
+
+<details>
+<summary><strong>Export</strong></summary>
+
+- Export the selected Clips, or all Clips if none are selected. You can reorder the export list and choose title, Category, and notes cards, Clip numbers, source audio, and 720p or 1080p output.
+- On macOS, Automatic mode tries VideoToolbox hardware encoding and falls back to software. Windows uses the `veryfast` software H.264 encoder.
+
+</details>
+
+## 🏗️ Architecture
+
+```text
+┌─────────────────────────── Electron ───────────────────────────┐
+│  Renderer (sandboxed, no Node)        Main process              │
+│  ┌──────────────────────────┐        ┌───────────────────────┐ │
+│  │ React workspace          │  IPC   │ Native menus/dialogs  │ │
+│  │  App · Player · Dialogs  │◄──────►│ Atomic file I/O       │ │
+│  │  domain.ts (model/codec) │preload │ Media streaming proto │ │
+│  └──────────────────────────┘        │ FFmpeg / ffprobe jobs │ │
+│                                      └───────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Build packages on their destination OS so their native video binaries match. macOS packages are unsigned/unnotarized unless signing is configured; Windows installers likewise need a signing identity for signed distribution. Native dependencies retain their supplied license files; bundled fonts retain their SIL Open Font Licenses.
+| Layer                                                  | Where                                     |
+| ------------------------------------------------------ | ----------------------------------------- |
+| Analysis model, codec, invariants, export ordering     | `src/domain.ts`                           |
+| React editing and document lifecycle                   | `src/App.tsx`                             |
+| Video element, transport, timeline                     | `src/Player.tsx`                          |
+| Playlists and sequence playback                        | `src/Playlists.tsx`, `src/useSequencePlayback.ts` |
+| Native menus and dialogs, restricted IPC, media streaming | `electron/main.ts`, `electron/preload.ts` |
+| Atomic persistence, relative paths, media fingerprints | `electron/files.ts`                       |
+| Probing and codec fallback copies                      | `electron/media.ts`                       |
+| Legacy pickle import                                   | `electron/legacy.ts`                      |
+| Export preflight, rendering, cancellation              | `electron/export.ts`                      |
 
-The GitHub Actions workflow checks and packages macOS and Windows independently. It has been added locally, not run remotely.
+### Performance choices
 
-See [MIGRATION.md](MIGRATION.md) for parity decisions and remaining validation work.
+- Frames never pass through JavaScript. FFmpeg does all decoding, encoding, and compositing natively.
+- Exports run in async child processes. Each Clip is normalized into a temporary segment, and the final concatenation is stream-copied. This keeps memory bounded but uses temporary disk space.
+- While a video plays, the playhead updates the DOM directly, so the Clip list doesn't rerender. Scrubbing is coalesced to animation frames.
+- Checking a Source video's identity hashes three 64 KiB regions, not the whole file.
+- Codecs the player can't handle are converted on demand into a cached 720p H.264/AAC playback copy. Exports still use the original media.
+
+> Electron uses more RAM and disk space than Qt or Tauri. TypeScript is used here for the editing and document logic, and native code still does the expensive media work. The rewrite hasn't been benchmarked against the Python app.
+
+## 📁 File compatibility
+
+| Schema | Written when                  | Readable by                 |
+| ------ | ----------------------------- | --------------------------- |
+| v1     | Analysis has no playlists     | Python app and this app     |
+| v2     | Analysis contains playlists   | This app only               |
+
+- `.analysis` files are JSON. The app keeps UUIDs, Clip creation order, Categories, notes, and external Source-video references intact. It uses the Python app's three-region SHA-256 media fingerprint.
+- Relative Source-video paths let you move the media folder together with the Analysis. You can relink missing media without losing Clips.
+- Older apps reject v2 files instead of silently dropping playlists. To keep a copy the Python app can open, use **Save As** before adding playlists.
+- Saves check for external changes first. After an abnormal exit, the app offers a debounced recovery snapshot on the next launch.
+- **Legacy pickle files** (`treewidget_item.ClipItem`) are imported with a restricted, data-only reader. It never imports Python globals or runs constructors. Files are limited to 32 MiB, and you must Save As to a new JSON file.
+
+## 🧪 Testing and packaging
+
+```sh
+npm test              # domain, persistence, React workflows, real FFmpeg exports
+npm run test:e2e      # builds and drives the Electron app with Playwright
+npm run package:mac   # run on ARM64 macOS  → release/*.dmg
+npm run package:win   # run on x64 Windows  → release/*.exe (NSIS)
+```
+
+Build each package on its target OS so the bundled FFmpeg binaries match. Packages are unsigned unless you configure a signing identity. GitHub Actions tests and packages macOS and Windows independently on every push.
+
+Native dependencies ship with their own license files. The bundled fonts (Inter, JetBrains Mono, Noto Sans) are under the SIL Open Font License.
+
+---
+
+See [MIGRATION.md](MIGRATION.md) for parity decisions against the Python app and the remaining validation work.

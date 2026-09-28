@@ -155,7 +155,7 @@ Shortcuts are ignored while a text field or dropdown has focus. New, Open, Save 
 | ------ | ----------------------------- | --------------------------- |
 | v1     | Analysis has no playlists     | Python app and this app     |
 | v2     | Analysis contains playlists   | This app only               |
-| v3     | Clips have freeze-frames      | This app (annotation build) |
+| v3     | Clips have freeze-frames      | This app only               |
 
 - `.analysis` files are JSON. The app keeps UUIDs, Clip creation order, Categories, notes, and external Source-video references intact. It uses the Python app's three-region SHA-256 media fingerprint.
 - Relative Source-video paths let you move the media folder together with the Analysis. You can relink missing media without losing Clips.

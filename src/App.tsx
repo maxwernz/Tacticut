@@ -268,7 +268,7 @@ export function App() {
   useEffect(() => {
     if (!ready) return;
     window.desktop.setDirty(dirty);
-    window.document.title = `${dirty ? "● " : ""}${analysis.title || "Untitled Analysis"} — Video Analyse`;
+    window.document.title = `${dirty ? "● " : ""}${analysis.title || "Untitled Analysis"} — Tacticut`;
     clearRecoveryTimer();
     if (dirty)
       recoveryTimer.current = setTimeout(() => {

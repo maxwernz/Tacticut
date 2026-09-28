@@ -32,8 +32,12 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-if (process.env.VIDEO_ANALYSE_USER_DATA)
-  app.setPath("userData", process.env.VIDEO_ANALYSE_USER_DATA);
+// Keep the pre-rename folder so recovery snapshots and device settings survive the Tacticut rename.
+app.setPath(
+  "userData",
+  process.env.VIDEO_ANALYSE_USER_DATA ||
+    join(app.getPath("appData"), "Video Analyse TS"),
+);
 let win: BrowserWindow;
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", () => {
@@ -338,7 +342,7 @@ app.whenReady().then(async () => {
     minWidth: 1000,
     minHeight: 680,
     backgroundColor: "#141619",
-    title: "Video Analyse",
+    title: "Tacticut",
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 16, y: 17 },
     ...(process.platform !== "darwin" ? { frame: false } : {}),

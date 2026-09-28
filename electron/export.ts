@@ -71,7 +71,7 @@ export async function renderExport(
       throw new Error(
         `“${c.name}” extends beyond its Source video. Edit its boundaries before exporting.`,
       );
-  const work = await mkdtemp(join(tmpdir(), "video-analyse-export-"));
+  const work = await mkdtemp(join(tmpdir(), "tacticut-export-"));
   const partial = join(
     dirname(output),
     `.${basename(output)}.${randomUUID()}.mp4`,

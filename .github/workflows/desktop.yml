@@ -25,7 +25,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
-          name: video-analyse-${{ matrix.os }}
+          name: tacticut-${{ matrix.os }}
           path: |
             release/*.dmg
             release/*.exe

@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🎬 Video Analyse TS
+# 🎬 Tacticut
 
 **Cross-platform sports video analysis for coaches: tag, trim, sequence, and export match footage.**
 
-[![Desktop checks and packages](https://github.com/maxwernz/VideoAnalyseTS/actions/workflows/desktop.yml/badge.svg)](https://github.com/maxwernz/VideoAnalyseTS/actions/workflows/desktop.yml)
+[![Desktop checks and packages](https://github.com/maxwernz/Tacticut/actions/workflows/desktop.yml/badge.svg)](https://github.com/maxwernz/Tacticut/actions/workflows/desktop.yml)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-41-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -15,10 +15,10 @@
 
 ---
 
-Video Analyse TS is a TypeScript desktop rewrite of the Python/PySide/QML [Video Analyse](https://github.com/maxwernz/Video-Analyse) app. Electron provides the desktop shell, React renders the workspace, and native FFmpeg processes do the video work. You don't need Python installed.
+Tacticut (formerly *Video Analyse TS*) is a TypeScript desktop rewrite of the Python/PySide/QML [Video Analyse](https://github.com/maxwernz/Video-Analyse) app. Electron provides the desktop shell, React renders the workspace, and native FFmpeg processes do the video work. You don't need Python installed.
 
 <p align="center">
-  <img src="docs/screenshots/workspace.png" alt="Video Analyse TS workspace: Clips grouped by Category in the sidebar, the match video, and a colour-coded Clip timeline" width="900">
+  <img src="docs/screenshots/workspace.png" alt="Tacticut workspace: Clips grouped by Category in the sidebar, the match video, and a colour-coded Clip timeline" width="900">
 </p>
 
 ## ✨ Highlights

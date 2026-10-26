@@ -12,7 +12,7 @@ export const ffmpeg: string = (
   .replace("app.asar/", "app.asar.unpacked/")
   .replace("app.asar\\", "app.asar.unpacked\\");
 export const ffprobe: string = (
-  process.env.VIDEO_ANALYSE_FFPROBE || requireNative("ffprobe-static").path
+  process.env.VIDEO_ANALYSE_FFPROBE || requireNative("@ffprobe-installer/ffprobe").path
 )
   .replace("app.asar/", "app.asar.unpacked/")
   .replace("app.asar\\", "app.asar.unpacked\\");

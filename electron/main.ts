@@ -20,6 +20,7 @@ import {
 } from "./files";
 import { children, playbackProxy, probe, sourceFromPath } from "./media";
 import { exportSchema, renderExport } from "./export";
+import { startUpdater } from "./updates/updater";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -39,6 +40,8 @@ app.setPath(
     join(app.getPath("appData"), "Video Analyse TS"),
 );
 let win: BrowserWindow;
+let checkForUpdates: () => Promise<"available" | "current" | null> = async () =>
+  null;
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", () => {
   if (win && !win.isDestroyed()) {
@@ -268,6 +271,15 @@ function registerIPC() {
     }
   });
   handle("cancel-export", () => exporter?.abort());
+  checkForUpdates = startUpdater({
+    repo: "maxwernz/Tacticut",
+    feed: process.env.TACTICUT_UPDATE_FEED,
+    handle,
+    quit: () => {
+      approved = true;
+      app.quit();
+    },
+  }).checkNow;
   ipcMain.on("dirty", (event, value) => {
     if (event.sender === win.webContents) {
       dirty = Boolean(value);
@@ -279,6 +291,22 @@ function registerIPC() {
       approved = true;
       win.close();
     }
+  });
+}
+/** The menu item: an available update shows in the window; otherwise say why there is none. */
+async function checkForUpdatesNow() {
+  const found = await checkForUpdates();
+  if (found === "available" || win.isDestroyed()) return;
+  await dialog.showMessageBox(win, {
+    type: found === "current" ? "info" : "warning",
+    message:
+      found === "current"
+        ? `Tacticut ${app.getVersion()} is the latest version.`
+        : "Could not check for updates.",
+    detail:
+      found === "current"
+        ? undefined
+        : "Check your internet connection and try again later.",
   });
 }
 app.whenReady().then(async () => {
@@ -360,7 +388,28 @@ app.whenReady().then(async () => {
   const command = (name: string) => () => win.webContents.send("command", name);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+      ...(process.platform === "darwin"
+        ? [
+            {
+              label: app.name,
+              submenu: [
+                { role: "about" as const },
+                {
+                  label: "Check for Updates…",
+                  click: () => void checkForUpdatesNow(),
+                },
+                { type: "separator" as const },
+                { role: "services" as const },
+                { type: "separator" as const },
+                { role: "hide" as const },
+                { role: "hideOthers" as const },
+                { role: "unhide" as const },
+                { type: "separator" as const },
+                { role: "quit" as const },
+              ],
+            },
+          ]
+        : []),
       {
         label: "File",
         submenu: [
@@ -410,6 +459,19 @@ app.whenReady().then(async () => {
           ...(app.isPackaged ? [] : [{ role: "toggleDevTools" as const }]),
         ],
       },
+      ...(process.platform === "darwin"
+        ? []
+        : [
+            {
+              label: "Help",
+              submenu: [
+                {
+                  label: "Check for Updates…",
+                  click: () => void checkForUpdatesNow(),
+                },
+              ],
+            },
+          ]),
     ]),
   );
   win.on("close", (event) => {

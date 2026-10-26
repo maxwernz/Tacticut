@@ -1614,3 +1614,48 @@ progress {
     transition: none !important;
   }
 }
+.update-notice {
+  position: fixed;
+  top: 58px;
+  right: 14px;
+  z-index: 20;
+  width: 300px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: #252930;
+  color: #d7d9df;
+  box-shadow: 0 6px 20px #0007;
+  line-height: 1.45;
+}
+.update-notice strong {
+  font-size: 12.5px;
+  color: #e8eaed;
+}
+.update-notes,
+.update-hint {
+  margin-top: 4px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.update-bar {
+  margin-top: 9px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.update-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}

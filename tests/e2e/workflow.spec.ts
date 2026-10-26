@@ -142,10 +142,12 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
     await expect(page.locator(".category-heading")).toContainText("Attack");
     await expect
       .poll(
-        async () =>
-          JSON.parse(
-            await readFile(join(dir, "user-data", "recovery.json"), "utf8"),
-          ).analysis.categories[1].name,
+        // The snapshot is debounced, so it may not exist yet on the first polls.
+        () =>
+          readFile(join(dir, "user-data", "recovery.json"), "utf8").then(
+            (text) => JSON.parse(text).analysis.categories[1].name,
+            () => null,
+          ),
       )
       .toBe("Attack");
     await page.screenshot({ path: "test-results/workspace.png" });
@@ -170,6 +172,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
     await expect(recovered.getByRole("status")).toContainText("Analysis saved");
   } finally {
     if (app) await app.evaluate(({ app }) => app.exit(0)).catch(() => {});
-    await rm(dir, { recursive: true, force: true });
+    // Electron may still be flushing its profile into user-data just after exit.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });

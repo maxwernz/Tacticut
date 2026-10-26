@@ -2,6 +2,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,6 +13,7 @@ import {
 import { App } from "../src/App";
 import { newAnalysis, type Analysis, type SourceVideo } from "../src/domain";
 import type { DesktopAPI, Loaded } from "../src/api";
+import type { UpdateState } from "../src/updates";
 let saved: Loaded | null;
 let command: (name: string) => void;
 let source: SourceVideo;
@@ -646,4 +648,49 @@ describe("editing workflow through the actual React interface", () => {
     await waitFor(() => expect(window.desktop.export).toHaveBeenCalled());
     expect(JSON.stringify(saved?.analysis)).toBe(before);
   });
+});
+it("installs an update only after the unsaved-changes prompt lets the user leave", async () => {
+  let notify!: (state: UpdateState) => void;
+  const updates = {
+    state: vi.fn(async (): Promise<UpdateState> => ({ status: "none" })),
+    install: vi.fn(async () => true),
+    restart: vi.fn(async () => {}),
+    openPage: vi.fn(async () => {}),
+    onChange: (fn: (state: UpdateState) => void) => {
+      notify = fn;
+      return () => {};
+    },
+  };
+  window.desktop.updates = updates;
+  await boot();
+  await add();
+  await mark();
+  act(() =>
+    notify({
+      status: "available",
+      version: "9.9.9",
+      notes: "Better exports",
+      page: "https://github.com/maxwernz/Tacticut/releases/tag/v9.9.9",
+      canInstall: true,
+    }),
+  );
+  expect(await screen.findByText("Tacticut 9.9.9 is available")).toBeTruthy();
+  expect(screen.getByText("Better exports")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Install and restart" }));
+  await screen.findByRole("dialog", { name: "Save Analysis changes?" });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Save Analysis changes?" })).toBeNull(),
+  );
+  expect(updates.install).toHaveBeenCalled();
+  expect(updates.restart).not.toHaveBeenCalled();
+
+  act(() => notify({ status: "ready", version: "9.9.9" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Restart now" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+  await waitFor(() => expect(updates.restart).toHaveBeenCalled());
+  expect(saved?.analysis.clips).toHaveLength(1);
+  expect(window.desktop.recovery).toHaveBeenCalledWith(null);
+  expect(window.desktop.close).not.toHaveBeenCalled();
 });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { UpdateNotice } from "./UpdateNotice";
 import {
   ArrowDown,
   ArrowUp,
@@ -533,7 +534,7 @@ export function App() {
       if (name === "save" || name === "save-as") await save(name === "save-as");
       else if (name === "add")
         await addSources(await window.desktop.addVideos());
-      else if (["new", "open", "close"].includes(name)) {
+      else if (["new", "open", "close", "restart-update"].includes(name)) {
         if (!(await mayLeave())) return;
         if (name === "open") {
           const data = await window.desktop.open();
@@ -548,10 +549,11 @@ export function App() {
           await window.desktop.recovery(null);
           replace({ analysis: newAnalysis(template), path: null, stamp: null });
         }
-        if (name === "close") {
+        if (name === "close" || name === "restart-update") {
           clearRecoveryTimer();
           await window.desktop.recovery(null);
-          window.desktop.close();
+          if (name === "close") window.desktop.close();
+          else await window.desktop.updates?.restart();
         }
       }
     });
@@ -1284,6 +1286,10 @@ export function App() {
           />
         )}
       </div>
+      <UpdateNotice
+        updates={window.desktop.updates}
+        onRestart={() => command("restart-update")}
+      />
       {(notice || busy) && (
         <div className="notice-toast" role="status">
           <span>{busy ? "Working…" : notice}</span>

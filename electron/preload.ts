@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopAPI } from "../src/api";
+import { UPDATE_CHANNELS } from "../src/updates";
 const subscribe = (channel: string, fn: (value: any) => void) => {
   const listener = (_: unknown, value: unknown) => fn(value);
   ipcRenderer.on(channel, listener);
@@ -25,5 +26,12 @@ const api: DesktopAPI = {
   onCommand: (fn) => subscribe("command", fn),
   setDirty: (dirty) => ipcRenderer.send("dirty", dirty),
   close: () => ipcRenderer.send("close-approved"),
+  updates: {
+    state: () => ipcRenderer.invoke(UPDATE_CHANNELS.state),
+    install: () => ipcRenderer.invoke(UPDATE_CHANNELS.install),
+    restart: () => ipcRenderer.invoke(UPDATE_CHANNELS.restart),
+    openPage: () => ipcRenderer.invoke(UPDATE_CHANNELS.openPage),
+    onChange: (fn) => subscribe(UPDATE_CHANNELS.changed, fn),
+  },
 };
 contextBridge.exposeInMainWorld("desktop", api);

@@ -6,6 +6,6 @@ await build({
   bundle: true,
   platform: "node",
   format: "cjs",
-  external: ["electron", "ffmpeg-static", "ffprobe-static", "@resvg/resvg-js"],
+  external: ["electron", "ffmpeg-static", "@ffprobe-installer/ffprobe", "@resvg/resvg-js"],
   sourcemap: true,
 });

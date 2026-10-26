@@ -1,4 +1,5 @@
 import type { Analysis, Category, SourceVideo } from "./domain";
+import type { UpdatesApi } from "./updates";
 export type Media = {
   url: string;
   path: string;
@@ -48,6 +49,8 @@ export interface DesktopAPI {
   onCommand(fn: (command: string) => void): () => void;
   setDirty(dirty: boolean): void;
   close(): void;
+  /** Absent in test doubles of the bridge. */
+  updates?: UpdatesApi;
 }
 declare global {
   interface Window {

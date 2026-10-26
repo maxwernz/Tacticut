@@ -49,6 +49,18 @@ Tacticut (formerly *Video Analyse TS*) is a TypeScript desktop rewrite of the Py
 
 <sub>The screenshots use a synthetic demo video.</sub>
 
+## 📦 Install (macOS)
+
+1. Download `Tacticut-<version>-arm64.dmg` from the [latest release](https://github.com/maxwernz/Tacticut/releases/latest) (Apple Silicon, macOS 14+).
+2. Open it and drag **Tacticut** into **Applications**. Run it from there, not from the disk image, or it can't update itself.
+3. The app isn't notarized by Apple, so macOS blocks the first launch. Open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**. Alternatively, run `xattr -dr com.apple.quarantine /Applications/Tacticut.app` once.
+
+### Updates
+
+Tacticut checks GitHub Releases on launch and every six hours. You can also use **Tacticut → Check for Updates…**. When a newer version is out, a card offers **Install and restart**. The app downloads the new build, checks its signature, asks you to save unsaved changes, then restarts into the new version. If you choose **Later**, a downloaded update installs the next time you quit.
+
+Updates are signed with an Ed25519 key. The app only installs a build signed with the key whose public half it carries (`electron/updates/signature.ts`).
+
 ## 🚀 Getting started
 
 Requires **Node.js 22.12+** (Node 24 recommended).
@@ -193,7 +205,20 @@ npm run package:mac   # run on ARM64 macOS  → release/*.dmg
 npm run package:win   # run on x64 Windows  → release/*.exe (NSIS)
 ```
 
-Build each package on its target OS so the bundled FFmpeg binaries match. Packages are unsigned unless you configure a signing identity. GitHub Actions tests and packages macOS and Windows independently on every push.
+Build each package on its target OS so the bundled FFmpeg binaries match. macOS builds are signed ad hoc (Apple Silicon refuses unsigned code) and are not notarized. GitHub Actions tests and packages macOS and Windows independently on every push.
+
+### Releasing an update
+
+```sh
+# 1. bump "version" in package.json (installed copies only take a higher one)
+# 2. commit and push
+npm run release -- --notes "What changed"   # tests, builds, signs, publishes
+npm run release -- --dry-run                # build and sign only
+```
+
+The script needs Node 23.6+, an Apple Silicon Mac, and `gh` logged in. It publishes `Tacticut-<version>-arm64.dmg` (for new installs), and the `.zip` and its `.sig` (for updates), to a GitHub release tagged `v<version>` on the pushed commit. It signs with `~/.config/tacticut/update-signing-key.pem` (or `TACTICUT_UPDATE_SIGNING_KEY`). **Back that key up.** If it's lost, installed copies can't verify new releases, and you'll have to reinstall manually from a build carrying a new key.
+
+To try an update before publishing, point an installed copy at another feed with `TACTICUT_UPDATE_FEED=<url of a GitHub-style release JSON>`. Windows releases aren't published yet. The updater already handles NSIS installers named `Tacticut-<version>-x64-setup.exe` with a `.sig`.
 
 Native dependencies ship with their own license files. The bundled fonts (Inter, JetBrains Mono, Noto Sans) are under the SIL Open Font License.
 

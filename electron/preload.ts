@@ -10,6 +10,7 @@ const api: DesktopAPI = {
   platform: process.platform,
   windowControl: (action) => ipcRenderer.send("window-control", action),
   open: () => ipcRenderer.invoke("open"),
+  openPending: () => ipcRenderer.invoke("open-pending"),
   save: (data, as) => ipcRenderer.invoke("save", data, as),
   addVideos: () => ipcRenderer.invoke("add-videos"),
   importPaths: (paths) => ipcRenderer.invoke("import-paths", paths),

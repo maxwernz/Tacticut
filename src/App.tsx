@@ -534,7 +534,14 @@ export function App() {
       if (name === "save" || name === "save-as") await save(name === "save-as");
       else if (name === "add")
         await addSources(await window.desktop.addVideos());
-      else if (["new", "open", "close", "restart-update"].includes(name)) {
+      else if (name === "open-file") {
+        // Read first: without a file waiting there is nothing to ask about.
+        const data = await window.desktop.openPending();
+        if (!data || !(await mayLeave())) return;
+        clearRecoveryTimer();
+        await window.desktop.recovery(null);
+        replace(data);
+      } else if (["new", "open", "close", "restart-update"].includes(name)) {
         if (!(await mayLeave())) return;
         if (name === "open") {
           const data = await window.desktop.open();
@@ -560,6 +567,10 @@ export function App() {
   }
   const commandRef = useRef(command);
   commandRef.current = command;
+  // A double-clicked Analysis that launched the app opens once start-up (and any recovery) is done.
+  useEffect(() => {
+    if (ready) void commandRef.current("open-file");
+  }, [ready]);
   useEffect(
     () => window.desktop.onCommand((name) => void commandRef.current(name)),
     [],

@@ -91,6 +91,7 @@ window.desktop = {
   }),
   relink: async () => null,
   recovery: async () => {},
+  openPending: async () => null,
   restore: async () =>
     new URLSearchParams(location.search).has("empty") ? null : saved,
   template: async (categories) => categories || a.categories,

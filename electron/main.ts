@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol } from "electron";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { Readable } from "node:stream";
@@ -43,11 +43,37 @@ let win: BrowserWindow;
 let checkForUpdates: () => Promise<"available" | "current" | null> = async () =>
   null;
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on("second-instance", () => {
+/**
+ * An Analysis opened from Finder or Explorer. The window fetches it with
+ * "open-pending", so it can ask about unsaved changes first and can never name
+ * a path itself.
+ */
+let pendingFile: string | null = null;
+let rendererReady = false;
+const analysisArg = (argv: string[]) =>
+  argv.find((arg) => /\.analysis$/i.test(arg) && existsSync(arg)) ?? null;
+function openFromSystem(path: string | null) {
+  if (!path) return;
+  pendingFile = path;
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    if (rendererReady) win.webContents.send("command", "open-file");
+  }
+}
+// macOS: also fires before "ready" when a double-click launches the app.
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  openFromSystem(path);
+});
+// Windows and Linux pass the file as an argument, to the first or a second instance.
+if (process.platform !== "darwin") pendingFile = analysisArg(process.argv.slice(1));
+app.on("second-instance", (_event, argv) => {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
     win.focus();
   }
+  if (process.platform !== "darwin") openFromSystem(analysisArg(argv.slice(1)));
 });
 let dirty = false,
   approved = false;
@@ -122,6 +148,12 @@ function registerIPC() {
       properties: ["openFile"],
     });
     return result.canceled ? null : load(result.filePaths[0]);
+  });
+  handle("open-pending", async () => {
+    rendererReady = true;
+    const path = pendingFile;
+    pendingFile = null;
+    return path ? load(path) : null;
   });
   handle("save", async (raw, as) => {
     const data = recoveryPayload(raw);

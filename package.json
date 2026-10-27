@@ -1,6 +1,6 @@
 {
   "name": "tacticut",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Sports video analysis for coaches: tag, cut, annotate, and export match footage",
   "author": "Max Wernz",
@@ -63,6 +63,15 @@
       "node_modules/@ffprobe-installer/**/*"
     ],
     "afterPack": "scripts/adhoc-sign.cjs",
+    "fileAssociations": [
+      {
+        "ext": "analysis",
+        "name": "Tacticut Analysis",
+        "description": "Tacticut Analysis",
+        "role": "Editor",
+        "rank": "Owner"
+      }
+    ],
     "mac": {
       "icon": "build-assets/app_icon.icns",
       "target": [

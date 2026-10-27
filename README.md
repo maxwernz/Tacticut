@@ -31,6 +31,8 @@ Tacticut (formerly *Video Analyse TS*) is a TypeScript desktop rewrite of the Py
 - **Fast native export.** FFmpeg renders 720p/1080p combined exports with title, Category, and notes cards. It shows progress and can be cancelled.
 - **Safe by design.** Saves use atomic replacement, a crash-recovery snapshot protects unsaved edits, the renderer is sandboxed, and IPC goes through a narrow preload bridge.
 - **Backward compatible.** It reads and writes the Python app's `.analysis` files and imports legacy pickle files safely.
+- **Opens from Finder and Explorer.** Double-click an `.analysis` file to open it. Tacticut asks about unsaved changes first.
+- **Clips from match statistics.** An optional MCP server lets Claude find BWHV match videos and turn game-time moments into Analyses or MP4 clips (see [`mcp/README.md`](mcp/README.md)).
 
 ## 📸 Screenshots
 

@@ -63,6 +63,7 @@ beforeEach(() => {
     relink: vi.fn(async () => null),
     recovery: vi.fn(async () => {}),
     restore: vi.fn(async () => null),
+    openPending: vi.fn(async () => null),
     template: vi.fn(async (categories) => categories || initial.categories),
     export: vi.fn(async () => "/out.mp4"),
     cancelExport: vi.fn(async () => {}),
@@ -693,4 +694,70 @@ it("installs an update only after the unsaved-changes prompt lets the user leave
   expect(saved?.analysis.clips).toHaveLength(1);
   expect(window.desktop.recovery).toHaveBeenCalledWith(null);
   expect(window.desktop.close).not.toHaveBeenCalled();
+});
+
+function finderAnalysis(): Loaded {
+  const analysis = structuredClone(initial);
+  analysis.source_videos = [source];
+  analysis.clips = [
+    {
+      id: crypto.randomUUID(),
+      source_video_id: source.id,
+      name: "From Finder",
+      start_ms: 1000,
+      end_ms: 4000,
+      notes: "",
+      category_id: null,
+      creation_order: 0,
+    },
+  ];
+  return { analysis, path: "/finder.analysis", stamp: "finder" };
+}
+
+it("opens an Analysis double-clicked before launch once start-up is done", async () => {
+  const openPending = vi
+    .fn<DesktopAPI["openPending"]>()
+    .mockResolvedValueOnce(finderAnalysis())
+    .mockResolvedValue(null);
+  window.desktop.openPending = openPending;
+  await boot();
+  await waitFor(() =>
+    expect(document.querySelector(".clip-row")?.textContent).toContain(
+      "From Finder",
+    ),
+  );
+  expect(openPending).toHaveBeenCalledTimes(1);
+});
+
+it("asks about unsaved changes before opening a double-clicked Analysis", async () => {
+  await boot();
+  await add();
+  await mark();
+  window.desktop.openPending = vi.fn(async () => finderAnalysis());
+  act(() => command("open-file"));
+  await screen.findByRole("dialog", { name: "Save Analysis changes?" });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Save Analysis changes?" }),
+    ).toBeNull(),
+  );
+  expect(document.querySelector(".clip-row")?.textContent).toContain(
+    "Fast break",
+  );
+  await waitFor(() =>
+    expect(
+      (screen.getByTitle("New Analysis") as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  act(() => command("open-file"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Discard changes" }),
+  );
+  await waitFor(() =>
+    expect(document.querySelector(".clip-row")?.textContent).toContain(
+      "From Finder",
+    ),
+  );
+  expect(window.desktop.recovery).toHaveBeenCalledWith(null);
 });

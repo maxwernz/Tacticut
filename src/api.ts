@@ -30,6 +30,8 @@ export interface DesktopAPI {
   platform: string;
   windowControl(action: "minimize" | "maximize" | "close"): void;
   open(): Promise<Loaded | null>;
+  /** The Analysis last opened from Finder or Explorer, once; null if there is none. */
+  openPending(): Promise<Loaded | null>;
   save(data: Loaded, saveAs: boolean): Promise<Loaded | null>;
   addVideos(): Promise<SourceVideo[]>;
   importPaths(paths: string[]): Promise<SourceVideo[]>;

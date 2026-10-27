@@ -310,6 +310,8 @@ async function checkForUpdatesNow() {
   });
 }
 app.whenReady().then(async () => {
+  const icon = join(app.getAppPath(), app.isPackaged ? "dist" : "public", "app-icon.png");
+  if (process.platform === "darwin" && !app.isPackaged) app.dock?.setIcon(icon);
   protocol.handle("media", async (request) => {
     const path = mediaPaths.get(new URL(request.url).pathname.slice(1));
     if (!path) return new Response("Not found", { status: 404 });
@@ -371,6 +373,7 @@ app.whenReady().then(async () => {
     minHeight: 680,
     backgroundColor: "#141619",
     title: "Tacticut",
+    icon,
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 16, y: 17 },
     ...(process.platform !== "darwin" ? { frame: false } : {}),

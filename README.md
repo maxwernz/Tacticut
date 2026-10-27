@@ -207,6 +207,8 @@ npm run package:win   # run on x64 Windows  → release/*.exe (NSIS)
 
 Build each package on its target OS so the bundled FFmpeg binaries match. macOS builds are signed ad hoc (Apple Silicon refuses unsigned code) and are not notarized. GitHub Actions tests and packages macOS and Windows independently on every push.
 
+The app icon master is `public/app-icon.png`. After replacing it, run `npm run icons` on macOS to regenerate the committed macOS and Windows icons in `build-assets/`. The same master is used for development windows and the browser favicon.
+
 ### Releasing an update
 
 ```sh

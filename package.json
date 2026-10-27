@@ -6,6 +6,7 @@
   "author": "Max Wernz",
   "main": "dist-electron/main.cjs",
   "scripts": {
+    "icons": "node scripts/build-icons.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build && node scripts/build.mjs",
     "start": "electron .",

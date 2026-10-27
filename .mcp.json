@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tacticut": {
+      "command": "node",
+      "args": [
+        "--disable-warning=ExperimentalWarning",
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        "mcp/server.mts"
+      ]
+    }
+  }
+}

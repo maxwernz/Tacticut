@@ -15,7 +15,8 @@
     "package": "npm run build && electron-builder",
     "package:mac": "npm run build && electron-builder --mac --arm64",
     "package:win": "npm run build && electron-builder --win --x64",
-    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.mts"
+    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.mts",
+    "mcp": "node --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON mcp/server.mts"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",
@@ -27,6 +28,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@playwright/test": "^1.56.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",

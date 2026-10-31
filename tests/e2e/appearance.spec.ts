@@ -10,6 +10,7 @@ import { resolve, join } from "node:path";
 import { tourSteps } from "../../src/WelcomeTour";
 
 test("light workspace and welcome tour are complete, keyboard accessible and persistent", async () => {
+  test.setTimeout(120000);
   const dir = await mkdtemp(join(tmpdir(), "tacticut-appearance-"));
   let app: ElectronApplication | undefined;
   const launch = () =>

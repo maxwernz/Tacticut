@@ -201,7 +201,7 @@ test("projects, stable rosters, templates, history, drawing controls and player 
     await page.getByLabel("Analysis title").click();
     await page.keyboard.press("End");
     await page.keyboard.type(" edited");
-    await page.keyboard.press("Meta+z");
+    await page.keyboard.press("ControlOrMeta+z");
     await expect(page.getByLabel("Analysis title")).not.toHaveValue(
       "Season review edited",
     );

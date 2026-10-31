@@ -264,11 +264,12 @@ The app icon master is `public/app-icon.png`. After replacing it, run `npm run i
 # 2. commit and push
 npm run release -- --notes "What changed"   # tests, builds, signs, publishes
 npm run release -- --dry-run                # build and sign only
+npm run release:windows                     # then: sign and attach the Windows installer CI built
 ```
 
 The script needs Node 23.6+, an Apple Silicon Mac, and `gh` logged in. It publishes `Tacticut-<version>-arm64.dmg` (for new installs), and the `.zip` and its `.sig` (for updates), to a GitHub release tagged `v<version>` on the pushed commit. It signs with `~/.config/tacticut/update-signing-key.pem` (or `TACTICUT_UPDATE_SIGNING_KEY`). **Back that key up.** If it's lost, installed copies can't verify new releases, and you'll have to reinstall manually from a build carrying a new key.
 
-To try an update before publishing, point an installed copy at another feed with `TACTICUT_UPDATE_FEED=<url of a GitHub-style release JSON>`. Windows releases aren't published yet. The updater already handles NSIS installers named `Tacticut-<version>-x64-setup.exe` with a `.sig`.
+To try an update before publishing, point an installed copy at another feed with `TACTICUT_UPDATE_FEED=<url of a GitHub-style release JSON>`. Windows can't be built on a Mac, so GitHub Actions builds the installer. `npm run release:windows` waits for (or starts) the CI build of the release commit, signs `Tacticut-<version>-x64-setup.exe` with the same key and attaches it with its `.sig`. The installer isn't Authenticode-signed, so Windows SmartScreen warns on first install (More info → Run anyway).
 
 Native dependencies ship with their own license files. The bundled fonts (Inter, JetBrains Mono, Noto Sans) are under the SIL Open Font License.
 

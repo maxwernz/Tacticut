@@ -16,6 +16,7 @@
     "package:mac": "npm run build && electron-builder --mac --arm64",
     "package:win": "npm run build && electron-builder --win --x64",
     "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.mts",
+    "release:windows": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release-windows.mts",
     "mcp": "node --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON mcp/server.mts"
   },
   "dependencies": {

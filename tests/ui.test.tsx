@@ -112,7 +112,7 @@ async function mark() {
   fireEvent.click(screen.getByRole("button", { name: /Mark Clip start/ }));
   v.currentTime = 3;
   fireEvent.click(screen.getByRole("button", { name: /Mark Clip end/ }));
-  await screen.findByRole("heading", { name: "Edit Clip" });
+  await screen.findByRole("heading", { name: "Tag play" });
   fireEvent.change(screen.getByLabelText("NAME", { exact: true }), {
     target: { value: "Fast break" },
   });
@@ -400,12 +400,19 @@ it("stops on missing media and cancels playlist playback when seeking manually",
 it("stops sequence preview at its end and loops only the draft interval", async () => {
   await boot();
   await add();
-  const video = document.querySelector("video")!;
+  const mainVideo = document.querySelector("video")!;
+  let video = mainVideo;
   video.currentTime = 1;
   fireEvent.click(screen.getByRole("button", { name: /Mark Clip start/ }));
   video.currentTime = 3;
   fireEvent.click(screen.getByRole("button", { name: /Mark Clip end/ }));
-  await screen.findByRole("heading", { name: "Edit Clip" });
+  await screen.findByRole("heading", { name: "Tag play" });
+  await waitFor(() =>
+    expect(document.querySelector(".tagging-preview-frame video")).toBeTruthy(),
+  );
+  video = document.querySelector(".tagging-preview-frame video")!;
+  if (!document.querySelector<HTMLDetailsElement>(".tagging-timing")?.open)
+    fireEvent.click(screen.getByText(/Clip timing & preview/));
   fireEvent.click(screen.getByRole("button", { name: "Preview sequence" }));
   expect(video.currentTime).toBe(1);
   video.currentTime = 3.1;
@@ -413,6 +420,8 @@ it("stops sequence preview at its end and loops only the draft interval", async 
   expect(video.currentTime).toBe(3);
   expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Loop" }));
+  if (!document.querySelector<HTMLDetailsElement>(".tagging-timing")?.open)
+    fireEvent.click(screen.getByText(/Clip timing & preview/));
   fireEvent.click(screen.getByRole("button", { name: "Preview sequence" }));
   video.currentTime = 3.1;
   fireEvent.timeUpdate(video);
@@ -501,11 +510,11 @@ describe("editing workflow through the actual React interface", () => {
     });
     expect(speed.textContent).toContain("0.25×");
     for (let i = 0; i < 12; i++) fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(speed.textContent).toContain("2×");
+    expect(speed.textContent).toContain("8×");
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Clip sort" }), {
       key: "ArrowDown",
     });
-    expect(speed.textContent).toContain("2×");
+    expect(speed.textContent).toContain("8×");
   });
   it("shows batch checkboxes only in selection mode and clears hidden selections", async () => {
     await boot();
@@ -539,10 +548,9 @@ describe("editing workflow through the actual React interface", () => {
       target: { value: "Do not keep" },
     });
     fireEvent.click(
-      within(document.querySelector(".clip-editor") as HTMLElement).getByRole(
-        "button",
-        { name: "Cancel" },
-      ),
+      within(
+        document.querySelector(".tagging-workspace") as HTMLElement,
+      ).getByRole("button", { name: "Cancel" }),
     );
     expect(document.querySelector(".clip-info strong")?.textContent).toBe(
       "Fast break",
@@ -580,7 +588,7 @@ describe("editing workflow through the actual React interface", () => {
     fireEvent.click(screen.getAllByTitle("Remove Category")[1]);
     fireEvent.click(screen.getByRole("button", { name: "Save Categories" }));
     expect(document.querySelector(".category-heading")?.textContent).toContain(
-      "Ohne Kategorie",
+      "Uncategorized",
     );
     fireEvent.click(screen.getByTitle("Save Analysis"));
     await waitFor(() =>
@@ -682,7 +690,9 @@ it("installs an update only after the unsaved-changes prompt lets the user leave
   await screen.findByRole("dialog", { name: "Save Analysis changes?" });
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await waitFor(() =>
-    expect(screen.queryByRole("dialog", { name: "Save Analysis changes?" })).toBeNull(),
+    expect(
+      screen.queryByRole("dialog", { name: "Save Analysis changes?" }),
+    ).toBeNull(),
   );
   expect(updates.install).toHaveBeenCalled();
   expect(updates.restart).not.toHaveBeenCalled();
@@ -760,4 +770,192 @@ it("asks about unsaved changes before opening a double-clicked Analysis", async 
     ),
   );
   expect(window.desktop.recovery).toHaveBeenCalledWith(null);
+});
+
+it("applies handball capture context, searches it, and clears context when opening another Analysis", async () => {
+  await boot();
+  await add();
+  fireEvent.click(screen.getByTitle("Quick capture settings"));
+  fireEvent.click(screen.getByText("Handball capture context"));
+  fireEvent.change(screen.getByLabelText("Attacking team"), {
+    target: { value: "Home" },
+  });
+  fireEvent.change(screen.getByLabelText("Attacking player"), {
+    target: { value: "7 Meyer" },
+  });
+  fireEvent.click(screen.getByRole("combobox", { name: "Tactical phase" }));
+  fireEvent.click(screen.getByRole("option", { name: "Fast break" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  const video = document.querySelector("video")!;
+  video.currentTime = 5;
+  fireEvent.keyDown(document.body, { key: "1" });
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved?.analysis.clips).toHaveLength(1));
+  expect(saved!.analysis.clips[0].handball).toEqual({
+    team: "Home",
+    player: "7 Meyer",
+    phase: "fast-break",
+  });
+  fireEvent.change(screen.getByLabelText("Search Clips"), {
+    target: { value: "Meyer" },
+  });
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(1);
+  const other = newAnalysis();
+  other.source_videos.push(source);
+  window.desktop.open = vi.fn(async () => ({
+    analysis: other,
+    path: "/other.analysis",
+    stamp: "other",
+  }));
+  await act(async () => command("open"));
+  await waitFor(() =>
+    expect(document.querySelectorAll(".clip-row")).toHaveLength(0),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Mark Clip start" }),
+    ).toHaveProperty("disabled", false),
+  );
+  document.querySelector("video")!.currentTime = 5;
+  fireEvent.keyDown(document.body, { key: "1" });
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved?.analysis.id).toBe(other.id));
+  expect(saved!.analysis.clips[0].handball).toBeUndefined();
+});
+
+it("uses capture presets and a remembered jump interval for keyboard navigation", async () => {
+  await boot();
+  await add();
+  fireEvent.click(screen.getByTitle("Quick capture settings"));
+  fireEvent.click(screen.getByRole("button", { name: /Possession/ }));
+  expect(screen.getByLabelText("Seconds before")).toHaveProperty("value", "20");
+  expect(screen.getByLabelText("Seconds after")).toHaveProperty("value", "5");
+  fireEvent.click(screen.getByText("Navigation settings"));
+  fireEvent.change(screen.getByLabelText("Jump interval (seconds)"), {
+    target: { value: "3" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(localStorage.getItem("navigation-jump")).toBe("3");
+  const video = document.querySelector("video")!;
+  video.currentTime = 5;
+  fireEvent.keyDown(document.body, { key: "ArrowLeft", shiftKey: true });
+  expect(video.currentTime).toBe(2);
+  fireEvent.click(screen.getByTitle("Forward 3 seconds"));
+  expect(video.currentTime).toBe(5);
+});
+
+it("changes appearance without dirtying the project and remembers the choice", async () => {
+  await boot();
+  fireEvent.click(screen.getByRole("combobox", { name: "Appearance" }));
+  fireEvent.click(screen.getByRole("option", { name: "Light appearance" }));
+  expect(document.documentElement.dataset.theme).toBe("light");
+  expect(localStorage.getItem("tacticut-appearance")).toBe("light");
+  expect(window.desktop.setDirty).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole("combobox", { name: "Appearance" }));
+  fireEvent.click(screen.getByRole("option", { name: "Dark appearance" }));
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(window.desktop.setDirty).toHaveBeenLastCalledWith(false);
+});
+it("welcomes projects and guides through features without modifying a saved Analysis", async () => {
+  await boot();
+  expect(screen.getByRole("heading", { name: "Start a project" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open project" })).toBeTruthy();
+  await add();
+  await mark();
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved).not.toBeNull());
+  const before = structuredClone(saved!.analysis);
+  const originalTab = document.querySelector(
+    ".sidebar-tabs .active",
+  )?.textContent;
+  fireEvent.click(screen.getByRole("button", { name: "Welcome tour" }));
+  expect(
+    screen.getByRole("dialog", { name: "Your Analysis is your project" }),
+  ).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "m" });
+  await act(async () => command("new"));
+  expect(document.querySelector(".tagging-workspace")).toBeNull();
+  fireEvent.click(screen.getByRole("combobox", { name: "Tour chapter" }));
+  fireEvent.click(
+    screen.getByRole("option", { name: /9. Explore the shooting picture/ }),
+  );
+  await waitFor(() =>
+    expect(
+      document.querySelector<HTMLDetailsElement>('[data-tour="shot-maps"]')
+        ?.open,
+    ).toBe(true),
+  );
+  expect(document.querySelector(".workspace")?.hasAttribute("inert")).toBe(
+    true,
+  );
+  fireEvent.click(screen.getByRole("combobox", { name: "Tour chapter" }));
+  fireEvent.click(
+    screen.getByRole("option", { name: /17. Edit with confidence/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Finish tour" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.querySelector(".sidebar-tabs .active")?.textContent).toBe(
+    originalTab,
+  );
+  expect(localStorage.getItem("tacticut-tour-seen")).toBe("yes");
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved!.analysis).toEqual(before));
+  await act(async () => command("tour"));
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("undoes and redoes clips across saves, preserves typing and clears history when opening a project", async () => {
+  await boot();
+  await add();
+  await mark();
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(() => expect(saved?.analysis.clips).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: "Undo project edit" }));
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(0);
+  expect(window.desktop.setDirty).toHaveBeenLastCalledWith(true);
+  fireEvent.keyDown(document.body, { key: "z", metaKey: true, shiftKey: true });
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(1);
+  expect(window.desktop.setDirty).toHaveBeenLastCalledWith(false);
+  fireEvent.keyDown(screen.getByLabelText("Analysis title"), {
+    key: "z",
+    metaKey: true,
+  });
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(1);
+  fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(0);
+  fireEvent.keyDown(document.body, { key: "y", ctrlKey: true });
+  expect(document.querySelectorAll(".clip-row")).toHaveLength(1);
+  fireEvent.click(screen.getByTitle("Open Analysis"));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Undo project edit" }),
+    ).toHaveProperty("disabled", true),
+  );
+  expect(
+    screen.getByRole("button", { name: "Redo project edit" }),
+  ).toHaveProperty("disabled", true);
+});
+
+it("removes a category from every clip tag and saved view, and undo restores all references", async () => {
+  const a = newAnalysis();
+  a.source_videos = [source];
+  a.clips = [{id:crypto.randomUUID(),source_video_id:source.id,name:"Multi-theme play",start_ms:1000,end_ms:3000,notes:"",creation_order:0,category_id:a.categories[0].id,category_ids:[a.categories[0].id,a.categories[1].id]}];
+  a.handball_views = [{id:crypto.randomUUID(),name:"Two themes",filters:{},query:"",source_video_id:null,category_ids:[a.categories[0].id,a.categories[1].id]}];
+  window.desktop.open = vi.fn(async()=>({analysis:a,path:"/themes.analysis",stamp:"themes"}));
+  await boot();fireEvent.click(screen.getByTitle("Open Analysis"));
+  await waitFor(()=>expect(document.querySelectorAll(".clip-row")).toHaveLength(1));
+  fireEvent.click(screen.getByTitle("Manage Categories"));
+  fireEvent.click(screen.getAllByTitle("Remove Category")[0]);
+  fireEvent.click(screen.getByRole("button",{name:"Save Categories"}));
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(()=>expect(saved?.analysis.categories).toHaveLength(2));
+  expect(saved!.analysis.clips[0].category_id).toBe(a.categories[1].id);
+  expect(saved!.analysis.clips[0].category_ids).toBeUndefined();
+  expect(saved!.analysis.handball_views![0].category_ids).toEqual([a.categories[1].id]);
+  fireEvent.click(screen.getByRole("button",{name:"Undo project edit"}));
+  fireEvent.click(screen.getByTitle("Save Analysis"));
+  await waitFor(()=>expect(saved?.analysis.categories).toHaveLength(3));
+  expect(saved!.analysis.clips[0].category_ids).toEqual(a.clips[0].category_ids);
+  expect(saved!.analysis.handball_views![0].category_ids).toEqual(a.handball_views[0].category_ids);
 });

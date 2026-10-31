@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -28,6 +29,7 @@ export function ColorPicker({
   value: string;
   onChange(color: string): void;
 }) {
+  useLanguage();
   const root = useRef<HTMLDivElement>(null),
     button = useRef<HTMLButtonElement>(null),
     popup = useRef<HTMLDivElement>(null);
@@ -96,7 +98,7 @@ export function ColorPicker({
                 <button
                   type="button"
                   key={color}
-                  aria-label={`Use ${color}`}
+                  aria-label={t("Use {color}", { color: color })}
                   aria-pressed={color.toLowerCase() === value.toLowerCase()}
                   style={{ background: color }}
                   onClick={() => {
@@ -112,9 +114,9 @@ export function ColorPicker({
               ))}
             </div>
             <label>
-              Custom hex
+              {t("Custom hex")}
               <input
-                aria-label="Custom Category color"
+                aria-label={t("Custom Category color")}
                 value={hex}
                 maxLength={7}
                 onChange={(e) => {

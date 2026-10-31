@@ -1,8 +1,20 @@
+import { t, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, Circle, Plus, Redo2, Trash2, Undo2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  Circle,
+  Plus,
+  Redo2,
+  Trash2,
+  Undo2,
+  MousePointer2,
+  Minus,
+  Type,
+} from "lucide-react";
 import { Modal } from "./Dialogs";
 import { Select } from "./Select";
-import { AnnotationCanvas } from "./AnnotationCanvas";
+import { AnnotationCanvas, type DrawingTool } from "./AnnotationCanvas";
+import { moveDrawing } from "./annotations";
 import {
   freezeFrameSchema,
   timecode,
@@ -26,6 +38,7 @@ export function AnnotationEditor({
   onSave(frames: FreezeFrame[]): void;
   onClose(): void;
 }) {
+  useLanguage();
   const bound = (ms: number) =>
     Math.max(clip.start_ms, Math.min(clip.end_ms - 1, Math.round(ms)));
   const blank = (ms: number): FreezeFrame => ({
@@ -44,9 +57,19 @@ export function AnnotationEditor({
   );
   const frames = history[index],
     current = frames.find((f) => f.id === selected) || frames[0];
-  const [tool, setTool] = useState<Drawing["kind"]>("arrow"),
+  const [tool, setTool] = useState<DrawingTool>("arrow"),
     [color, setColor] = useState("#FACC15"),
     [width, setWidth] = useState(0.006);
+  const [selectedShape, setSelectedShape] = useState<string | null>(null),
+    [text, setText] = useState(""),
+    [fontSize, setFontSize] = useState(0.045);
+  const selectedDrawing =
+    tool === "select"
+      ? current.shapes.find((s) => s.id === selectedShape)
+      : undefined;
+  useEffect(() => {
+    setSelectedShape(null);
+  }, [current.id]);
   const [ready, setReady] = useState(false),
     [error, setError] = useState(""),
     [discard, setDiscard] = useState(false);
@@ -65,6 +88,7 @@ export function AnnotationEditor({
     JSON.stringify(persisted) !==
     JSON.stringify([...initial].sort((a, b) => a.time_ms - b.time_ms));
   const commit = (next: FreezeFrame[]) => {
+    if (JSON.stringify(next) === JSON.stringify(frames)) return;
     const previous = history.slice(0, index + 1);
     const stack = [...previous, next].slice(-50);
     setHistory(stack);
@@ -73,6 +97,38 @@ export function AnnotationEditor({
   };
   const update = (patch: Partial<FreezeFrame>) =>
     commit(frames.map((f) => (f.id === current.id ? { ...f, ...patch } : f)));
+  const changeShape = (shape: Drawing) =>
+    update({
+      shapes: current.shapes.map((s) => (s.id === shape.id ? shape : s)),
+    });
+  const deleteShape = () => {
+    if (!selectedDrawing) return;
+    update({
+      shapes: current.shapes.filter((s) => s.id !== selectedDrawing.id),
+    });
+    setSelectedShape(null);
+  };
+  const historyCommand = (redo: boolean) =>
+    setIndex((i) =>
+      redo ? Math.min(history.length - 1, i + 1) : Math.max(0, i - 1),
+    );
+  const nativeCommand = useRef((name: string) => {});
+  nativeCommand.current = (name) => {
+    if (name !== "undo" && name !== "redo") return;
+    if (
+      (document.activeElement as HTMLElement | null)?.closest(
+        "input:not([type=range]),textarea,[contenteditable=true]",
+      )
+    ) {
+      document.execCommand?.(name);
+      return;
+    }
+    historyCommand(name === "redo");
+  };
+  useEffect(
+    () => window.desktop?.onCommand((name) => nativeCommand.current(name)),
+    [],
+  );
   const seek = () => {
     const v = video.current;
     if (!v || !current || v.readyState < 1) return;
@@ -132,32 +188,64 @@ export function AnnotationEditor({
   }, [current.id, current.time_ms, media.url]);
   const close = () => (dirty ? setDiscard(true) : onClose());
   return (
-    <Modal title={`Freeze-frames · ${clip.name}`} wide onClose={close}>
+    <Modal
+      title={t("Freeze-frames · {name}", { name: clip.name })}
+      wide
+      onClose={close}
+    >
       <div
         className="annotation-editor"
         onKeyDown={(e) => {
           if (
-            (e.ctrlKey || e.metaKey) &&
-            e.key.toLowerCase() === "z" &&
-            !(e.target as HTMLElement).closest("input,textarea")
+            (e.target as HTMLElement).closest(
+              "input,textarea,[contenteditable=true]",
+            )
+          )
+            return;
+          const key = e.key.toLowerCase();
+          if ((e.ctrlKey || e.metaKey) && (key === "z" || key === "y")) {
+            e.preventDefault();
+            e.stopPropagation();
+            historyCommand(key === "y" || e.shiftKey);
+          } else if (
+            selectedDrawing &&
+            (key === "delete" || key === "backspace")
           ) {
             e.preventDefault();
             e.stopPropagation();
-            setIndex((i) =>
-              e.shiftKey
-                ? Math.min(history.length - 1, i + 1)
-                : Math.max(0, i - 1),
+            deleteShape();
+          } else if (
+            selectedDrawing &&
+            ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            const amount = e.shiftKey ? 0.02 : 0.005;
+            changeShape(
+              moveDrawing(
+                selectedDrawing,
+                e.key === "ArrowLeft"
+                  ? -amount
+                  : e.key === "ArrowRight"
+                    ? amount
+                    : 0,
+                e.key === "ArrowUp"
+                  ? -amount
+                  : e.key === "ArrowDown"
+                    ? amount
+                    : 0,
+              ),
             );
           }
         }}
       >
         <div className="annotation-topline">
           <Select
-            label="Coaching moment"
+            label={t("Coaching moment")}
             value={current.id}
             options={frames.map((f, i) => ({
               value: f.id,
-              label: `${i + 1} · ${timecode(f.time_ms)}${!f.shapes.length ? " · new" : ""}`,
+              label: `${i + 1} · ${timecode(f.time_ms)}${!f.shapes.length ? t(" · new") : ""}`,
             }))}
             onChange={setSelected}
           />
@@ -169,10 +257,10 @@ export function AnnotationEditor({
             }}
           >
             <Plus size={14} />
-            New moment
+            {t("New moment")}
           </button>
           <button
-            title="Delete coaching moment"
+            title={t("Delete coaching moment")}
             onClick={() => {
               const remaining = frames.filter((f) => f.id !== current.id);
               const next = remaining.length
@@ -188,53 +276,82 @@ export function AnnotationEditor({
         <div
           className="annotation-tools"
           role="toolbar"
-          aria-label="Drawing tools"
+          aria-label={t("Drawing tools")}
         >
+          <button
+            aria-pressed={tool === "select"}
+            onClick={() => setTool("select")}
+          >
+            <MousePointer2 size={16} />
+            {t("Select")}
+          </button>
           <button
             aria-pressed={tool === "arrow"}
             onClick={() => setTool("arrow")}
           >
             <ArrowUpRight size={16} />
-            Arrow
+            {t("Arrow")}
           </button>
           <button
             aria-pressed={tool === "circle"}
             onClick={() => setTool("circle")}
           >
             <Circle size={16} />
-            Circle
+            {t("Circle")}
+          </button>
+          <button
+            aria-pressed={tool === "line"}
+            onClick={() => setTool("line")}
+          >
+            <Minus size={16} />
+            {t("Line")}
+          </button>
+          <button
+            aria-pressed={tool === "text"}
+            onClick={() => setTool("text")}
+          >
+            <Type size={16} />
+            {t("Text")}
           </button>
           {["#FACC15", "#FFFFFF", "#EF4444", "#38BDF8"].map((c) => (
             <button
               key={c}
               className="drawing-color"
-              aria-label={`Draw in ${c}`}
-              aria-pressed={color === c}
-              onClick={() => setColor(c)}
+              aria-label={t("Draw in {color}", { color: c })}
+              aria-pressed={(selectedDrawing?.color || color) === c}
+              onClick={() => {
+                setColor(c);
+                if (selectedDrawing)
+                  changeShape({ ...selectedDrawing, color: c });
+              }}
             >
               <span style={{ background: c }} />
             </button>
           ))}
           <Select
-            label="Drawing thickness"
-            value={String(width)}
-            onChange={(v) => setWidth(Number(v))}
+            label={t("Drawing thickness")}
+            value={String(selectedDrawing?.width || width)}
+            onChange={(v) => {
+              setWidth(Number(v));
+              if (selectedDrawing)
+                changeShape({ ...selectedDrawing, width: Number(v) });
+            }}
             options={[
-              { value: "0.003", label: "Thin" },
-              { value: "0.006", label: "Medium" },
-              { value: "0.01", label: "Thick" },
+              { value: "0.003", label: t("Thin") },
+              { value: "0.006", label: t("Medium") },
+              { value: "0.01", label: t("Thick") },
             ]}
           />
           <span className="grow" />
           <button
-            title="Undo drawing edit"
+            title={t("Undo drawing edit")}
             disabled={!index}
             onClick={() => setIndex(index - 1)}
           >
             <Undo2 size={15} />
           </button>
           <button
-            title="Redo drawing edit"
+            title={t("Redo drawing edit")}
             disabled={index === history.length - 1}
             onClick={() => setIndex(index + 1)}
           >
@@ -244,9 +361,76 @@ export function AnnotationEditor({
             disabled={!current.shapes.length}
             onClick={() => update({ shapes: [] })}
           >
-            Clear drawings
+            {t("Clear drawings")}
           </button>
         </div>
+        {tool === "select" && (
+          <div className="annotation-properties">
+            <Select
+              label={t("Selected drawing")}
+              value={selectedDrawing?.id || ""}
+              options={[
+                { value: "", label: t("Choose a drawing") },
+                ...current.shapes.map((s, i) => ({
+                  value: s.id,
+                  label: `${i + 1} · ${t(s.kind)}${s.text ? ` · ${s.text.slice(0, 30)}` : ""}`,
+                })),
+              ]}
+              onChange={(id) => setSelectedShape(id || null)}
+            />
+            <button disabled={!selectedDrawing} onClick={deleteShape}>
+              <Trash2 size={14} />
+              {t("Delete selected")}
+            </button>
+            <span className="muted">
+              {t("Drag to move · white handles resize · arrow keys nudge")}
+            </span>
+          </div>
+        )}
+        {(tool === "text" || selectedDrawing?.kind === "text") && (
+          <div className="annotation-properties">
+            <label>
+              {t("Text")}{" "}
+              {selectedDrawing?.kind === "text" ? (
+                <TextDrawingInput
+                  key={selectedDrawing.id}
+                  value={selectedDrawing.text || ""}
+                  onCommit={(value) =>
+                    changeShape({ ...selectedDrawing, text: value })
+                  }
+                />
+              ) : (
+                <input
+                  aria-label={t("Drawing text")}
+                  maxLength={160}
+                  value={text}
+                  placeholder={t("e.g. Attack the space")}
+                  onChange={(e) => setText(e.target.value)}
+                />
+              )}
+            </label>
+            <Select
+              label={t("Text size")}
+              value={String(selectedDrawing?.font_size || fontSize)}
+              options={[
+                { value: "0.03", label: t("Small") },
+                { value: "0.045", label: t("Medium") },
+                { value: "0.06", label: t("Large") },
+                { value: "0.09", label: t("Extra large") },
+              ]}
+              onChange={(value) => {
+                setFontSize(Number(value));
+                if (selectedDrawing)
+                  changeShape({ ...selectedDrawing, font_size: Number(value) });
+              }}
+            />
+            <span className="muted">
+              {tool === "text"
+                ? t("Enter text, then drag a box on the video.")
+                : t("Resize the box to show more text.")}
+            </span>
+          </div>
+        )}
         <div className="annotation-stage">
           <video
             ref={video}
@@ -280,6 +464,11 @@ export function AnnotationEditor({
             tool={tool}
             color={color}
             width={width}
+            text={text}
+            fontSize={fontSize}
+            selected={selectedShape}
+            onSelect={setSelectedShape}
+            onChange={changeShape}
             disabled={!ready}
             onDraw={(shape) => {
               if (current.shapes.length >= 100) {
@@ -291,31 +480,31 @@ export function AnnotationEditor({
           />
           {!ready && (
             <span className="annotation-loading">
-              {error ? "Frame unavailable" : "Loading frame…"}
+              {t(error ? "Frame unavailable" : "Loading frame…")}
             </span>
           )}
         </div>
         <div className="annotation-timing">
           <button
-            title="Previous annotation frame"
+            title={t("Previous annotation frame")}
             onClick={() =>
               update({ time_ms: bound(current.time_ms - 1000 / media.fps) })
             }
           >
-            −1 frame
+            {t("−1 frame")}
           </button>
           <span className="mono">{timecode(current.time_ms)}</span>
           <button
-            title="Next annotation frame"
+            title={t("Next annotation frame")}
             onClick={() =>
               update({ time_ms: bound(current.time_ms + 1000 / media.fps) })
             }
           >
-            +1 frame
+            {t("+1 frame")}
           </button>
           <input
             type="range"
-            aria-label="Freeze-frame time"
+            aria-label={t("Freeze-frame time")}
             min={clip.start_ms}
             max={clip.end_ms - 1}
             step="1"
@@ -323,9 +512,9 @@ export function AnnotationEditor({
             onChange={(e) => update({ time_ms: Number(e.target.value) })}
           />
           <label>
-            Hold (seconds)
+            {t("Hold (seconds)")}
             <input
-              aria-label="Freeze duration in seconds"
+              aria-label={t("Freeze duration in seconds")}
               type="number"
               min="0.5"
               max="15"
@@ -340,28 +529,31 @@ export function AnnotationEditor({
           </label>
         </div>
         <p className="muted annotation-help">
-          Drag over the video to draw. Saved moments appear in Clip review,
-          playlists and exports; normal Source playback stays unchanged.
+          {t(
+            "Drag to draw. Use Select to move, resize or delete a drawing. Changes stay in this editor until Save; saved moments appear in reviews and exports.",
+          )}
         </p>
         {error && (
           <p className="inline-error" role="alert">
-            {error}
+            {t(error)}
           </p>
         )}
         {discard && (
           <div className="annotation-discard" role="alert">
-            Discard unsaved freeze-frame changes?
-            <button onClick={() => setDiscard(false)}>Keep editing</button>
-            <button onClick={onClose}>Discard changes</button>
+            {t("Discard unsaved freeze-frame changes?")}
+            <button onClick={() => setDiscard(false)}>
+              {t("Keep editing")}
+            </button>
+            <button onClick={onClose}>{t("Discard changes")}</button>
           </div>
         )}
       </div>
       <div className="modal-footer">
         <span className="muted">
-          {persisted.length} moments · file format v3
+          {t("{count} moments", { count: persisted.length })}
         </span>
         <span className="grow" />
-        <button onClick={close}>Cancel</button>
+        <button onClick={close}>{t("Cancel")}</button>
         <button
           className="primary"
           disabled={!dirty || (!ready && current.shapes.length > 0)}
@@ -385,9 +577,39 @@ export function AnnotationEditor({
             }
           }}
         >
-          Save freeze-frames
+          {t("Save freeze-frames")}
         </button>
       </div>
     </Modal>
+  );
+}
+
+function TextDrawingInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit(value: string): void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const save = () => {
+    if (draft.trim()) onCommit(draft.trim());
+    else setDraft(value);
+  };
+  return (
+    <input
+      aria-label={t("Drawing text")}
+      maxLength={160}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          save();
+        }
+      }}
+    />
   );
 }

@@ -1,5 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol } from "electron";
-import { createReadStream, existsSync } from "node:fs";
+import { tFor, type Language, type TranslationParams } from "../src/i18n";
+import {
+  createReadStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+} from "node:fs";
 import { readFile, stat, unlink } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { Readable } from "node:stream";
@@ -7,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   categorySchema,
+  categoryKey,
   defaults,
   sourceSchema,
   type SourceVideo,
@@ -20,6 +29,10 @@ import {
 } from "./files";
 import { children, playbackProxy, probe, sourceFromPath } from "./media";
 import { exportSchema, renderExport } from "./export";
+import { renderPlayerExports } from "./playerExports";
+import { saveReport } from "./reports";
+import { ProjectLibraryStore } from "./library";
+import type { Loaded } from "../src/api";
 import { startUpdater } from "./updates/updater";
 
 protocol.registerSchemesAsPrivileged([
@@ -33,13 +46,64 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-// Keep the pre-rename folder so recovery snapshots and device settings survive the Tacticut rename.
+// Move the pre-rename "Video Analyse TS" folder once, so recent projects,
+// templates, settings and recovery snapshots survive the Tacticut rename.
+function tacticutUserData(): string {
+  const appData = app.getPath("appData");
+  const current = join(appData, "Tacticut");
+  const legacy = join(appData, "Video Analyse TS");
+  try {
+    if (existsSync(legacy)) {
+      if (existsSync(current) && readdirSync(current).length === 0)
+        rmdirSync(current);
+      if (!existsSync(current)) renameSync(legacy, current);
+    }
+  } catch (error) {
+    console.error("Could not move the old settings folder", error);
+    if (existsSync(legacy) && !existsSync(current)) return legacy;
+  }
+  return current;
+}
 app.setPath(
   "userData",
-  process.env.VIDEO_ANALYSE_USER_DATA ||
-    join(app.getPath("appData"), "Video Analyse TS"),
+  process.env.TACTICUT_USER_DATA || tacticutUserData(),
 );
 let win: BrowserWindow;
+let language: Language = "en";
+let rebuildMenu = () => {};
+const t = (source: string, params?: TranslationParams) =>
+  tFor(language, source, params);
+const languagePath = () => join(app.getPath("userData"), "language.json");
+function languageMenus(
+  items: Electron.MenuItemConstructorOptions[],
+): Electron.MenuItemConstructorOptions[] {
+  const roles: Record<string, string> = {
+    about: "About Tacticut",
+    services: "Services",
+    hide: "Hide Tacticut",
+    hideOthers: "Hide Others",
+    unhide: "Show All",
+    quit: "Quit Tacticut",
+    close: "Close window",
+    cut: "Cut",
+    copy: "Copy",
+    paste: "Paste",
+    selectAll: "Select All",
+    togglefullscreen: "Toggle Fullscreen",
+    toggleDevTools: "Developer Tools",
+  };
+  return items.map((item) => ({
+    ...item,
+    ...(item.label
+      ? { label: t(item.label) }
+      : typeof item.role === "string" && roles[item.role]
+        ? { label: t(roles[item.role]) }
+        : {}),
+    ...(Array.isArray(item.submenu)
+      ? { submenu: languageMenus(item.submenu) }
+      : {}),
+  }));
+}
 let checkForUpdates: () => Promise<"available" | "current" | null> = async () =>
   null;
 if (!app.requestSingleInstanceLock()) app.exit(0);
@@ -49,15 +113,19 @@ if (!app.requestSingleInstanceLock()) app.exit(0);
  * a path itself.
  */
 let pendingFile: string | null = null;
+// Automated tests run the app without a window or Dock icon, so it never takes focus.
+const hidden = process.env.TACTICUT_HIDDEN === "1";
+if (hidden) app.dock?.hide();
+const PROJECT_FILE = /\.(tcut|analysis)$/i;
 let rendererReady = false;
 const analysisArg = (argv: string[]) =>
-  argv.find((arg) => /\.analysis$/i.test(arg) && existsSync(arg)) ?? null;
+  argv.find((arg) => PROJECT_FILE.test(arg) && existsSync(arg)) ?? null;
 function openFromSystem(path: string | null) {
   if (!path) return;
   pendingFile = path;
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
-    win.focus();
+    if (!hidden) win.focus();
     if (rendererReady) win.webContents.send("command", "open-file");
   }
 }
@@ -67,11 +135,12 @@ app.on("open-file", (event, path) => {
   openFromSystem(path);
 });
 // Windows and Linux pass the file as an argument, to the first or a second instance.
-if (process.platform !== "darwin") pendingFile = analysisArg(process.argv.slice(1));
+if (process.platform !== "darwin")
+  pendingFile = analysisArg(process.argv.slice(1));
 app.on("second-instance", (_event, argv) => {
   if (win && !win.isDestroyed()) {
     if (win.isMinimized()) win.restore();
-    win.focus();
+    if (!hidden) win.focus();
   }
   if (process.platform !== "darwin") openFromSystem(analysisArg(argv.slice(1)));
 });
@@ -97,7 +166,8 @@ const videoFilters = [
     ],
   },
 ];
-const analysisFilters = [{ name: "Analysis", extensions: ["analysis"] }];
+// New projects are saved as .tcut; .analysis files from before the rename still open.
+const analysisFilters = [{ name: "Analysis", extensions: ["tcut", "analysis"] }];
 const recoveryPath = () => join(app.getPath("userData"), "recovery.json");
 function queueRecovery(data: unknown) {
   const job = recoveryQueue
@@ -122,6 +192,16 @@ function mediaURL(path: string) {
   return `media://video/${token}`;
 }
 function registerIPC() {
+  const library = new ProjectLibraryStore(
+    join(app.getPath("userData"), "projects.json"),
+  );
+  const remember = async (data: Loaded) => {
+    // Index failures must not turn a successful project save into an apparent failure.
+    await library
+      .remember(data)
+      .catch((error) => console.warn("Project index:", error));
+    return data;
+  };
   ipcMain.on("window-control", (event, action) => {
     if (
       event.sender !== win.webContents ||
@@ -142,41 +222,74 @@ function registerIPC() {
         throw new Error("Untrusted request");
       return fn(...args);
     });
+  handle("set-language", async (raw) => {
+    const next = z.enum(["en", "de"]).parse(raw);
+    await atomicWrite(languagePath(), JSON.stringify({ language: next }));
+    language = next;
+    rebuildMenu();
+  });
   handle("open", async () => {
     const result = await dialog.showOpenDialog(win, {
-      filters: analysisFilters,
+      filters: analysisFilters.map((f) => ({ ...f, name: t(f.name) })),
       properties: ["openFile"],
     });
-    return result.canceled ? null : load(result.filePaths[0]);
+    return result.canceled ? null : remember(await load(result.filePaths[0]));
   });
   handle("open-pending", async () => {
     rendererReady = true;
     const path = pendingFile;
     pendingFile = null;
-    return path ? load(path) : null;
+    return path ? remember(await load(path)) : null;
   });
   handle("save", async (raw, as) => {
     const data = recoveryPayload(raw);
     let path = data.path;
     if (as || !path || data.legacyPath) {
       const result = await dialog.showSaveDialog(win, {
-        filters: analysisFilters,
+        filters: analysisFilters.map((f) => ({ ...f, name: t(f.name) })),
         defaultPath:
           (data.legacyPath
-            ? `${data.analysis.title.replace(/[/\\:*?"<>|]/g, "_")} (converted).analysis`
-            : path) ||
-          `${data.analysis.title.replace(/[/\\:*?"<>|]/g, "_") || "Untitled"}.analysis`,
+            ? `${data.analysis.title.replace(/[/\\:*?"<>|]/g, "_")} (converted).tcut`
+            : path?.replace(PROJECT_FILE, ".tcut")) ||
+          `${data.analysis.title.replace(/[/\\:*?"<>|]/g, "_") || t("Untitled")}.tcut`,
       });
       if (result.canceled || !result.filePath) return null;
-      path = result.filePath.endsWith(".analysis")
+      path = PROJECT_FILE.test(result.filePath)
         ? result.filePath
-        : `${result.filePath}.analysis`;
+        : `${result.filePath}.tcut`;
     }
-    return saveDocument(data, path);
+    return remember(await saveDocument(data, path));
   });
+  handle("projects", () => library.list());
+  handle("browse-projects", async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: t("Add projects to library"),
+      filters: analysisFilters.map((f) => ({ ...f, name: t(f.name) })),
+      properties: ["openFile", "multiSelections"],
+    });
+    if (!result.canceled) {
+      if (result.filePaths.length > 100)
+        throw new Error("Add up to 100 projects at a time.");
+      const documents = await Promise.all(
+        result.filePaths.map((path) => load(path)),
+      );
+      for (const document of documents) await library.remember(document);
+    }
+    return library.list();
+  });
+  handle("open-project", (path) => library.open(z.string().min(1).parse(path)));
+  handle("forget-project", (path) =>
+    library.forget(z.string().min(1).parse(path)),
+  );
+  handle("create-collection", (paths, title) =>
+    library.collection(
+      z.array(z.string().min(1)).min(2).max(30).parse(paths),
+      z.string().trim().min(1).max(120).parse(title),
+    ),
+  );
   handle("add-videos", async () => {
     const result = await dialog.showOpenDialog(win, {
-      filters: videoFilters,
+      filters: videoFilters.map((f) => ({ ...f, name: t(f.name) })),
       properties: ["openFile", "multiSelections"],
     });
     const sources: SourceVideo[] = [];
@@ -207,8 +320,8 @@ function registerIPC() {
   handle("relink", async (raw) => {
     const source = sourceSchema.parse(raw);
     const result = await dialog.showOpenDialog(win, {
-      title: `Relink ${source.display_name}`,
-      filters: videoFilters,
+      title: t("Relink {name}", { name: source.display_name }),
+      filters: videoFilters.map((f) => ({ ...f, name: t(f.name) })),
       properties: ["openFile"],
     });
     if (result.canceled) return null;
@@ -222,11 +335,12 @@ function registerIPC() {
       const answer = await dialog.showMessageBox(win, {
         type: "warning",
         message: source.fingerprint
-          ? "This is different footage."
-          : "The original recording has no identity information.",
-        detail:
+          ? t("This is different footage.")
+          : t("The original recording has no identity information."),
+        detail: t(
           "Existing Clips will keep their timestamps. Replace this Source video anyway?",
-        buttons: ["Cancel", "Replace Source video"],
+        ),
+        buttons: [t("Cancel"), t("Replace Source video")],
         defaultId: 0,
         cancelId: 0,
       });
@@ -251,10 +365,7 @@ function registerIPC() {
     const path = join(app.getPath("userData"), "category-template.json");
     if (raw !== undefined) {
       const categories = z.array(categorySchema).parse(raw);
-      if (
-        new Set(categories.map((c) => c.name.trim().toLowerCase())).size !==
-        categories.length
-      )
+      if (new Set(categories.map(categoryKey)).size !== categories.length)
         throw new Error("Category names must be unique");
       await atomicWrite(path, JSON.stringify(categories));
       return categories;
@@ -270,9 +381,9 @@ function registerIPC() {
   handle("export", async (raw, rawOptions) => {
     if (exporter) throw new Error("An export is already running");
     const data = recoveryPayload(raw),
-      options = exportSchema.parse(rawOptions);
+      options = exportSchema.parse({ ...rawOptions, language });
     const result = await dialog.showSaveDialog(win, {
-      title: "Combined export",
+      title: t("Combined export"),
       defaultPath: `${data.analysis.title.replace(/[/\\:*?"<>|]/g, "_") || "Analysis"}.mp4`,
       filters: [{ name: "MP4 video", extensions: ["mp4"] }],
     });
@@ -302,7 +413,43 @@ function registerIPC() {
       exporter = null;
     }
   });
+  handle("player-exports", async (raw, rawOptions) => {
+    if (exporter) throw new Error("An export is already running");
+    const data = recoveryPayload(raw),
+      options = exportSchema.parse({ ...rawOptions, language });
+    const target = await dialog.showOpenDialog(win, {
+      title: t("Choose a folder for player review videos"),
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (target.canceled || !target.filePaths[0]) return null;
+    exporter = new AbortController();
+    try {
+      return await renderPlayerExports(
+        data,
+        options,
+        target.filePaths[0],
+        join(
+          app.getAppPath(),
+          app.isPackaged
+            ? "dist/fonts/NotoSans.ttf"
+            : "public/fonts/NotoSans.ttf",
+        ),
+        exporter.signal,
+        (progress) => {
+          if (!win.isDestroyed()) win.webContents.send("progress", progress);
+        },
+      );
+    } finally {
+      exporter = null;
+    }
+  });
   handle("cancel-export", () => exporter?.abort());
+  handle("report", async (raw, rawIds, rawFormat) => {
+    const data = recoveryPayload(raw);
+    const ids = z.array(z.string().uuid()).min(1).max(100000).parse(rawIds);
+    const format = z.enum(["pdf", "csv"]).parse(rawFormat);
+    return saveReport(win, data.analysis, ids, format, data.path, language);
+  });
   checkForUpdates = startUpdater({
     repo: "maxwernz/Tacticut",
     feed: process.env.TACTICUT_UPDATE_FEED,
@@ -333,17 +480,31 @@ async function checkForUpdatesNow() {
     type: found === "current" ? "info" : "warning",
     message:
       found === "current"
-        ? `Tacticut ${app.getVersion()} is the latest version.`
-        : "Could not check for updates.",
+        ? t("Tacticut {version} is the latest version.", {
+            version: app.getVersion(),
+          })
+        : t("Could not check for updates."),
     detail:
       found === "current"
         ? undefined
-        : "Check your internet connection and try again later.",
+        : t("Check your internet connection and try again later."),
   });
 }
 app.whenReady().then(async () => {
-  const icon = join(app.getAppPath(), app.isPackaged ? "dist" : "public", "app-icon.png");
-  if (process.platform === "darwin" && !app.isPackaged) app.dock?.setIcon(icon);
+  try {
+    language = z
+      .enum(["en", "de"])
+      .parse(JSON.parse(readFileSync(languagePath(), "utf8")).language);
+  } catch {
+    language = app.getLocale().toLowerCase().startsWith("de") ? "de" : "en";
+  }
+  const icon = join(
+    app.getAppPath(),
+    app.isPackaged ? "dist" : "public",
+    "app-icon.png",
+  );
+  if (process.platform === "darwin" && !app.isPackaged && !hidden)
+    app.dock?.setIcon(icon);
   protocol.handle("media", async (request) => {
     const path = mediaPaths.get(new URL(request.url).pathname.slice(1));
     if (!path) return new Response("Not found", { status: 404 });
@@ -406,14 +567,18 @@ app.whenReady().then(async () => {
     backgroundColor: "#141619",
     title: "Tacticut",
     icon,
+    show: !hidden,
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 16, y: 17 },
     ...(process.platform !== "darwin" ? { frame: false } : {}),
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
+      additionalArguments: [`--tacticut-language=${language}`],
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // A hidden test window must keep timers and video running at full speed.
+      backgroundThrottling: !hidden,
     },
   });
   registerIPC();
@@ -421,94 +586,153 @@ app.whenReady().then(async () => {
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   const command = (name: string) => () => win.webContents.send("command", name);
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      ...(process.platform === "darwin"
-        ? [
-            {
-              label: app.name,
-              submenu: [
-                { role: "about" as const },
+  rebuildMenu = () => {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(
+        languageMenus([
+          ...(process.platform === "darwin"
+            ? [
                 {
-                  label: "Check for Updates…",
-                  click: () => void checkForUpdatesNow(),
+                  label: app.name,
+                  submenu: [
+                    { role: "about" as const },
+                    {
+                      label: "Settings…",
+                      accelerator: "CmdOrCtrl+,",
+                      click: command("settings"),
+                    },
+                    {
+                      label: "Check for Updates…",
+                      click: () => void checkForUpdatesNow(),
+                    },
+                    { type: "separator" as const },
+                    { role: "services" as const },
+                    { type: "separator" as const },
+                    { role: "hide" as const },
+                    { role: "hideOthers" as const },
+                    { role: "unhide" as const },
+                    { type: "separator" as const },
+                    { role: "quit" as const },
+                  ],
                 },
-                { type: "separator" as const },
-                { role: "services" as const },
-                { type: "separator" as const },
-                { role: "hide" as const },
-                { role: "hideOthers" as const },
-                { role: "unhide" as const },
-                { type: "separator" as const },
-                { role: "quit" as const },
-              ],
-            },
-          ]
-        : []),
-      {
-        label: "File",
-        submenu: [
+              ]
+            : []),
           {
-            label: "New Analysis",
-            accelerator: "CmdOrCtrl+N",
-            click: command("new"),
+            label: "File",
+            submenu: [
+              {
+                label: "Projects and collections…",
+                click: command("projects"),
+              },
+              {
+                label: "New Analysis",
+                accelerator: "CmdOrCtrl+N",
+                click: command("new"),
+              },
+              {
+                label: "Open Analysis…",
+                accelerator: "CmdOrCtrl+O",
+                click: command("open"),
+              },
+              {
+                label: "Add Source videos…",
+                accelerator: "CmdOrCtrl+Shift+V",
+                click: command("add"),
+              },
+              { type: "separator" },
+              {
+                label: "Save",
+                accelerator: "CmdOrCtrl+S",
+                click: command("save"),
+              },
+              {
+                label: "Save As…",
+                accelerator: "CmdOrCtrl+Shift+S",
+                click: command("save-as"),
+              },
+              {
+                label: "Combined export…",
+                accelerator: "CmdOrCtrl+E",
+                click: command("export"),
+              },
+              { type: "separator" },
+              { role: "close" },
+            ],
           },
           {
-            label: "Open Analysis…",
-            accelerator: "CmdOrCtrl+O",
-            click: command("open"),
+            label: "Edit",
+            submenu: [
+              {
+                label: "Undo",
+                accelerator: "CmdOrCtrl+Z",
+                click: command("undo"),
+              },
+              {
+                label: "Redo",
+                accelerator: "CmdOrCtrl+Shift+Z",
+                click: command("redo"),
+              },
+              { type: "separator" },
+              { role: "cut" },
+              { role: "copy" },
+              { role: "paste" },
+              { role: "selectAll" },
+            ],
           },
           {
-            label: "Add Source videos…",
-            accelerator: "CmdOrCtrl+Shift+V",
-            click: command("add"),
+            label: "Analysis",
+            submenu: [
+              {
+                label: "Project setup · roster & templates",
+                click: command("setup"),
+              },
+              { label: "Manage Categories", click: command("categories") },
+              { label: "Category template", click: command("template") },
+            ],
           },
-          { type: "separator" },
-          { label: "Save", accelerator: "CmdOrCtrl+S", click: command("save") },
           {
-            label: "Save As…",
-            accelerator: "CmdOrCtrl+Shift+S",
-            click: command("save-as"),
+            label: "View",
+            submenu: [
+              ...(process.platform === "darwin"
+                ? []
+                : [
+                    {
+                      label: "Settings…",
+                      accelerator: "CmdOrCtrl+,",
+                      click: command("settings"),
+                    },
+                  ]),
+              {
+                label: "Appearance",
+                submenu: [
+                  { label: "Light", click: command("theme-light") },
+                  { label: "Dark", click: command("theme-dark") },
+                  { label: "Follow system", click: command("theme-system") },
+                ],
+              },
+              { role: "togglefullscreen" },
+              ...(app.isPackaged ? [] : [{ role: "toggleDevTools" as const }]),
+            ],
           },
           {
-            label: "Combined export…",
-            accelerator: "CmdOrCtrl+E",
-            click: command("export"),
+            label: "Help",
+            submenu: [
+              { label: "Welcome tour", click: command("tour") },
+              ...(process.platform !== "darwin"
+                ? [
+                    {
+                      label: "Check for Updates…",
+                      click: () => void checkForUpdatesNow(),
+                    },
+                  ]
+                : []),
+            ],
           },
-          { type: "separator" },
-          { role: "close" },
-        ],
-      },
-      { role: "editMenu" },
-      {
-        label: "Analysis",
-        submenu: [
-          { label: "Manage Categories", click: command("categories") },
-          { label: "Category template", click: command("template") },
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { role: "togglefullscreen" },
-          ...(app.isPackaged ? [] : [{ role: "toggleDevTools" as const }]),
-        ],
-      },
-      ...(process.platform === "darwin"
-        ? []
-        : [
-            {
-              label: "Help",
-              submenu: [
-                {
-                  label: "Check for Updates…",
-                  click: () => void checkForUpdatesNow(),
-                },
-              ],
-            },
-          ]),
-    ]),
-  );
+        ]),
+      ),
+    );
+  };
+  rebuildMenu();
   win.on("close", (event) => {
     if (!approved) {
       event.preventDefault();

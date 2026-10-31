@@ -1,4 +1,12 @@
+import { handballLabel } from "./reports";
+import { t, useLanguage } from "./i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Settings } from "./Settings";
+import { emptyHistory, recordEdit, travelHistory } from "./history";
+import { PlayerExports } from "./PlayerExports";
+import { syncRosterTag } from "./roster";
+import { ProjectLibrary } from "./ProjectLibrary";
+import { ProjectSetup } from "./ProjectSetup";
 import { UpdateNotice } from "./UpdateNotice";
 import {
   ArrowDown,
@@ -20,9 +28,20 @@ import {
   X,
   Scissors,
   ListPlus,
+  CircleHelp,
+  Sun,
+  Moon,
+  Monitor,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import {
   defaults,
+  categoryShortcut,
+  categoryLabel,
+  clipCategoryIds,
+  clipCategoryLabels,
+  withClipCategories,
   captureRange,
   exportOrder,
   playlistClips,
@@ -42,6 +61,16 @@ import { Player, type PlayerHandle } from "./Player";
 import { ClipEditor } from "./ClipEditor";
 import { Select } from "./Select";
 import { Playlists } from "./Playlists";
+import { HandballPanel } from "./HandballPanel";
+import { HandballFields } from "./HandballFields";
+import { BatchHandball } from "./BatchHandball";
+import { WelcomeTour, type WorkspaceTab } from "./WelcomeTour";
+import { useTheme } from "./theme";
+import {
+  handballSearchText,
+  mergeHandballTag,
+  type HandballTag,
+} from "./handball";
 import { CategoryDialog, ExportDialog, Modal } from "./Dialogs";
 type Confirm = {
   title: string;
@@ -50,12 +79,33 @@ type Confirm = {
   resolve(value: number): void;
 };
 export function App() {
+  const { language } = useLanguage();
+  const [theme, setTheme] = useTheme();
+  const history = useRef(emptyHistory());
+  const [playerExportClips, setPlayerExportClips] = useState<Clip[] | null>(
+    null,
+  );
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tourSeen, setTourSeen] = useState(() => {
+    try {
+      return localStorage.getItem("tacticut-tour-seen") === "yes";
+    } catch {
+      return false;
+    }
+  });
+  const [tourFrom, setTourFrom] = useState<WorkspaceTab | null>(null);
   const [annotationSession, setAnnotationSession] = useState<{
     clip: Clip;
     time: number;
     media: Media;
   } | null>(null);
   const [captureSettings, setCaptureSettings] = useState(false);
+  const [batchTags, setBatchTags] = useState(false);
+  const [captureContext, setCaptureContext] = useState<
+    HandballTag | undefined
+  >();
   const [captureWindow, setCaptureWindow] = useState(() => {
     try {
       const value = JSON.parse(
@@ -78,6 +128,18 @@ export function App() {
       localStorage.setItem("capture-window", JSON.stringify(captureWindow));
     } catch {}
   }, [captureWindow]);
+  const [jumpSeconds, setJumpSeconds] = useState(() => {
+    try {
+      const n = Number(localStorage.getItem("navigation-jump"));
+      if (Number.isFinite(n) && n >= 1 && n <= 120) return n;
+    } catch {}
+    return 5;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("navigation-jump", String(jumpSeconds));
+    } catch {}
+  }, [jumpSeconds]);
   const [analysis, setAnalysis] = useState(() => newAnalysis()),
     [file, setFile] = useState<string | null>(null),
     [stamp, setStamp] = useState<string | null>(null),
@@ -93,7 +155,9 @@ export function App() {
     [selecting, setSelecting] = useState(false),
     [pending, setPending] = useState<number | null>(null),
     [draft, setDraft] = useState<Clip | null>(null);
-  const [tab, setTab] = useState<"clips" | "videos" | "playlists">("clips"),
+  const [tab, setTab] = useState<"clips" | "videos" | "playlists" | "handball">(
+      "clips",
+    ),
     [query, setQuery] = useState(""),
     [scope, setScope] = useState("all"),
     [sort, setSort] = useState("category"),
@@ -141,7 +205,9 @@ export function App() {
   function playPlaylist(playlist: Playlist, index = 0) {
     if (draft || pending !== null || busy || !ready) {
       setNotice(
-        "Finish or cancel the current Clip capture before playing a playlist.",
+        t(
+          "Finish or cancel the current Clip capture before playing a playlist.",
+        ),
       );
       return;
     }
@@ -168,8 +234,8 @@ export function App() {
       stopPlaylist();
       setNotice(
         current.playlistId === "clip-review"
-          ? "Clip review finished"
-          : "Playlist finished",
+          ? t("Clip review finished")
+          : t("Playlist finished"),
       );
       return;
     }
@@ -200,15 +266,64 @@ export function App() {
     legacyPath: latest.current.legacyPath,
   });
   const fail = (e: unknown) =>
-    setError(e instanceof Error ? e.message : String(e));
+    setError(t(e instanceof Error ? e.message : String(e)));
   const confirm = (title: string, text: string, choices: string[]) =>
     new Promise<number>((resolve) =>
       setConfirmation({ title, text, choices, resolve }),
     );
+  function commitAnalysis(next: Analysis, label?: string) {
+    history.current = recordEdit(
+      history.current,
+      latest.current.analysis,
+      next,
+      label,
+    );
+    latest.current = {
+      ...latest.current,
+      analysis: next,
+      serialized: JSON.stringify(next),
+      dirty: true,
+    };
+    setAnalysis(next);
+  }
+  function travel(direction: "undo" | "redo") {
+    if (draft || pending !== null || busy) return;
+    const result = travelHistory(
+      history.current,
+      latest.current.analysis,
+      direction,
+    );
+    if (!result) return;
+    stopPlaylist();
+    player.current?.stopPreview();
+    player.current?.pause();
+    history.current = result.history;
+    const next = result.document;
+    latest.current = {
+      ...latest.current,
+      analysis: next,
+      serialized: JSON.stringify(next),
+    };
+    setAnalysis(next);
+    setActive((id) =>
+      next.source_videos.some((s) => s.id === id)
+        ? id
+        : next.source_videos[0]?.id || null,
+    );
+    setSelected((id) => (next.clips.some((c) => c.id === id) ? id : null));
+    setPlaylistId((id) =>
+      next.playlists.some((p) => p.id === id) ? id : null,
+    );
+    setNotice(
+      t(direction === "undo" ? "Undid {edit}" : "Redid {edit}", {
+        edit: t(result.label),
+      }),
+    );
+  }
   const change = (fn: (a: Analysis) => void) => {
     stopPlaylist();
     try {
-      setAnalysis(mutate(latest.current.analysis, fn));
+      commitAnalysis(mutate(latest.current.analysis, fn));
     } catch (e) {
       fail(e);
     }
@@ -221,6 +336,7 @@ export function App() {
     stopPlaylist();
     setPlaylistId(null);
     clearRecoveryTimer();
+    history.current = emptyHistory();
     setAnalysis(data.analysis);
     setFile(data.path);
     setStamp(data.stamp);
@@ -228,16 +344,20 @@ export function App() {
     setSaved(unsaved || data.legacyPath ? "" : JSON.stringify(data.analysis));
     if (data.legacyPath)
       setNotice(
-        "Legacy Analysis imported. Save to a new JSON Analysis file to complete conversion.",
+        t(
+          "Legacy Analysis imported. Save to a new JSON Analysis file to complete conversion.",
+        ),
       );
     setActive(data.analysis.source_videos[0]?.id || null);
     setSelected(null);
     setChecked([]);
     setSelecting(false);
     setDraft(null);
+    setBatchTags(false);
     setPending(null);
     setQuery("");
     setScope("all");
+    setCaptureContext(undefined);
     setNavigation((n) => ({ ms: 0, revision: n.revision + 1 }));
   };
   useEffect(() => {
@@ -252,9 +372,12 @@ export function App() {
         const recovered = await window.desktop.restore();
         if (recovered) {
           const answer = await confirm(
-            "Recover unsaved Analysis?",
-            `Unsaved changes to “${recovered.analysis.title || "Untitled Analysis"}” were found from a previous session.`,
-            ["Restore Analysis", "Discard snapshot"],
+            t("Recover unsaved Analysis?"),
+            t(
+              "Unsaved changes to “{title}” were found from a previous session.",
+              { title: recovered.analysis.title || t("Untitled Analysis") },
+            ),
+            [t("Restore Analysis"), t("Discard snapshot")],
           );
           if (answer === 0) replace(recovered, true);
           else await window.desktop.recovery(null);
@@ -269,20 +392,26 @@ export function App() {
   useEffect(() => {
     if (!ready) return;
     window.desktop.setDirty(dirty);
-    window.document.title = `${dirty ? "● " : ""}${analysis.title || "Untitled Analysis"} — Tacticut`;
+    window.document.title = `${dirty ? "● " : ""}${analysis.title || t("Untitled Analysis")} — Tacticut`;
     clearRecoveryTimer();
     if (dirty)
       recoveryTimer.current = setTimeout(() => {
         void window.desktop.recovery(document()).catch(fail);
       }, 650);
     return clearRecoveryTimer;
-  }, [serialized, dirty, ready, file, stamp]);
+  }, [serialized, dirty, ready, file, stamp, language]);
   useEffect(() => window.desktop.onProgress(setProgress), []);
   useEffect(() => {
     if (
+      tourFrom !== null ||
+      playerExportClips ||
+      projectsOpen ||
+      settingsOpen ||
+      setupOpen ||
       confirmation ||
       categoryDialog ||
       exportClips ||
+      batchTags ||
       captureSettings ||
       playlistModal ||
       annotationSession ||
@@ -290,10 +419,16 @@ export function App() {
     )
       stopPlaylist();
   }, [
+    tourFrom,
+    playerExportClips,
+    projectsOpen,
+    settingsOpen,
+    setupOpen,
     confirmation,
     categoryDialog,
     exportClips,
     captureSettings,
+    batchTags,
     playlistModal,
     annotationSession,
     rename,
@@ -330,7 +465,7 @@ export function App() {
           legacyPath: result.legacyPath || null,
         });
       }
-      setNotice("Analysis saved");
+      setNotice(t("Analysis saved"));
       return true;
     } catch (e) {
       fail(e);
@@ -340,17 +475,19 @@ export function App() {
   async function mayLeave(): Promise<boolean> {
     if (draft || pending != null) {
       const answer = await confirm(
-        "Discard unfinished Clip?",
-        "The current Clip draft or pending boundary has not been added to the Analysis.",
-        ["Keep editing", "Discard unfinished Clip"],
+        t("Discard unfinished Clip?"),
+        t(
+          "The current Clip draft or pending boundary has not been added to the Analysis.",
+        ),
+        [t("Keep editing"), t("Discard unfinished Clip")],
       );
       if (answer !== 1) return false;
     }
     if (!latest.current.dirty) return true;
     const answer = await confirm(
-      "Save Analysis changes?",
-      "Save your changes before leaving this Analysis.",
-      ["Save", "Discard changes", "Cancel"],
+      t("Save Analysis changes?"),
+      t("Save your changes before leaving this Analysis."),
+      [t("Save"), t("Discard changes"), t("Cancel")],
     );
     if (answer === 2) return false;
     return answer === 0 ? save() : true;
@@ -360,9 +497,11 @@ export function App() {
     if ((draft || pending != null) && id !== active) {
       if (
         (await confirm(
-          "Switch Source video?",
-          "Switching discards the unfinished Clip on the active Source video.",
-          ["Keep editing", "Switch video"],
+          t("Switch Source video?"),
+          t(
+            "Switching discards the unfinished Clip on the active Source video.",
+          ),
+          [t("Keep editing"), t("Switch video")],
         )) !== 1
       )
         return false;
@@ -395,7 +534,7 @@ export function App() {
         }
       }
     });
-    setAnalysis(result);
+    commitAnalysis(result);
     setTab("videos");
     if (lastId && !draft && pending == null) {
       setActive(lastId);
@@ -407,9 +546,9 @@ export function App() {
     if (
       draft &&
       (await confirm(
-        "Discard Clip draft?",
-        "The edits in the current Clip draft have not been saved.",
-        ["Keep editing", "Discard draft"],
+        t("Discard Clip draft?"),
+        t("The edits in the current Clip draft have not been saved."),
+        [t("Keep editing"), t("Discard draft")],
       )) !== 1
     )
       return;
@@ -428,21 +567,48 @@ export function App() {
     if (pending === null) setPending(now);
     else if (now <= pending)
       fail(
-        new Error("Move the playhead after the Clip start to mark its end."),
+        new Error(t("Move the playhead after the Clip start to mark its end.")),
       );
     else {
       player.current?.pause();
       setDraft({
         id: crypto.randomUUID(),
         source_video_id: source.id,
-        name: `Clip ${analysis.clips.length + 1}`,
+        name: t("Clip {count}", { count: analysis.clips.length + 1 }),
         start_ms: pending,
         end_ms: now,
         category_id: null,
         notes: "",
         creation_order: analysis.clips.length,
+        ...(captureContext ? { handball: { ...captureContext } } : {}),
       });
       setPending(null);
+    }
+  }
+  function tagPlay() {
+    if (!source || draft || busy || queueRef.current || pending !== null)
+      return;
+    const capture = player.current?.capturePosition();
+    if (!capture) return;
+    try {
+      player.current?.pause();
+      setDraft({
+        id: crypto.randomUUID(),
+        source_video_id: source.id,
+        name: t("Clip {count}", { count: analysis.clips.length + 1 }),
+        ...captureRange(
+          capture.position,
+          Math.min(capture.duration, source.duration_ms ?? capture.duration),
+          captureWindow.before * 1000,
+          captureWindow.after * 1000,
+        ),
+        category_id: null,
+        notes: "",
+        creation_order: analysis.clips.length,
+        ...(captureContext ? { handball: { ...captureContext } } : {}),
+      });
+    } catch (error) {
+      fail(error);
     }
   }
   function quickTag(categoryId: string) {
@@ -465,12 +631,13 @@ export function App() {
         category_id: category.id,
         notes: "",
         creation_order: analysis.clips.length,
+        ...(captureContext ? { handball: { ...captureContext } } : {}),
       };
       change((a) => a.clips.push(clip));
       setTab("clips");
       setSelected(clip.id);
       setNotice(
-        `Captured ${category.name} · ${timecode(clip.start_ms, false)}–${timecode(clip.end_ms, false)}`,
+        `${t("Captured {name}", { name: category.name })} · ${timecode(clip.start_ms, false)}–${timecode(clip.end_ms, false)}${captureContext ? ` · ${[captureContext.team, captureContext.player].filter(Boolean).join(" / ") || t("Handball context applied")}` : ""}`,
       );
     } catch (e) {
       fail(e);
@@ -480,7 +647,7 @@ export function App() {
     stopPlaylist();
     const ids = checked.length ? checked : analysis.clips.map((c) => c.id);
     if (!ids.length) {
-      setNotice("Create a Clip before exporting");
+      setNotice(t("Create a Clip before exporting"));
       return;
     }
     setExportClips(exportOrder(analysis, ids));
@@ -500,19 +667,97 @@ export function App() {
       operation.current = false;
     }
   }
+  function startTour() {
+    if (
+      !ready ||
+      busy ||
+      draft ||
+      pending !== null ||
+      playerExportClips ||
+      projectsOpen ||
+      settingsOpen ||
+      setupOpen ||
+      confirmation ||
+      categoryDialog ||
+      exportClips ||
+      batchTags ||
+      captureSettings ||
+      playlistModal ||
+      annotationSession ||
+      rename
+    )
+      return;
+    stopPlaylist();
+    player.current?.stopPreview();
+    player.current?.pause();
+    setTourFrom(tab);
+  }
+  function closeTour() {
+    if (tourFrom !== null) setTab(tourFrom);
+    setTourFrom(null);
+    setTourSeen(true);
+    try {
+      localStorage.setItem("tacticut-tour-seen", "yes");
+    } catch {}
+  }
   async function command(name: string) {
+    if (annotationSession && (name === "undo" || name === "redo")) return;
+    if (
+      (name === "undo" || name === "redo") &&
+      window.document.activeElement?.closest(
+        "input,textarea,[contenteditable=true]",
+      )
+    ) {
+      window.document.execCommand(name);
+      return;
+    }
+    if (
+      name === "theme-light" ||
+      name === "theme-dark" ||
+      name === "theme-system"
+    ) {
+      setTheme(name.slice(6) as "light" | "dark" | "system");
+      return;
+    }
+
     if (
       !ready ||
       operation.current ||
+      tourFrom !== null ||
+      playerExportClips ||
+      projectsOpen ||
+      settingsOpen ||
+      setupOpen ||
       confirmation ||
       categoryDialog ||
       rename ||
       exportClips ||
       playlistModal ||
       annotationSession ||
+      batchTags ||
       captureSettings
     )
       return;
+    if (name === "settings") {
+      setSettingsOpen(true);
+      return;
+    }
+    if (name === "projects") {
+      setProjectsOpen(true);
+      return;
+    }
+    if (name === "setup") {
+      setSetupOpen(true);
+      return;
+    }
+    if (name === "undo" || name === "redo") {
+      travel(name);
+      return;
+    }
+    if (name === "tour") {
+      startTour();
+      return;
+    }
     if (name === "export") {
       showExport();
       return;
@@ -578,12 +823,19 @@ export function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
+        tourFrom !== null ||
+        !!draft ||
         busy ||
         !ready ||
+        playerExportClips ||
+        projectsOpen ||
+        settingsOpen ||
+        setupOpen ||
         confirmation ||
         categoryDialog ||
         exportClips ||
         rename ||
+        batchTags ||
         captureSettings ||
         playlistModal ||
         annotationSession ||
@@ -593,11 +845,24 @@ export function App() {
           ))
       )
         return;
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        (e.key.toLowerCase() === "z" ||
+          (!e.metaKey && e.key.toLowerCase() === "y"))
+      ) {
+        e.preventDefault();
+        if (!e.repeat)
+          travel(e.shiftKey || e.key.toLowerCase() === "y" ? "redo" : "undo");
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (!e.shiftKey && /^[1-9]$/.test(e.key)) {
         e.preventDefault();
         if (!e.repeat) {
-          const category = analysis.categories[Number(e.key) - 1];
+          const category = analysis.categories.find(
+            (c) => categoryShortcut(analysis.categories, c) === Number(e.key),
+          );
           if (category) quickTag(category.id);
         }
         return;
@@ -609,11 +874,15 @@ export function App() {
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         const d = e.key === "ArrowLeft" ? -1 : 1;
-        e.shiftKey ? player.current?.jump(d * 5000) : player.current?.step(d);
+        player.current?.scrub(d, e.shiftKey);
       }
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
         player.current?.changeSpeed(e.key === "ArrowUp" ? 1 : -1);
+      }
+      if (e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        if (!e.repeat) tagPlay();
       }
       if (e.key.toLowerCase() === "m") {
         e.preventDefault();
@@ -635,11 +904,11 @@ export function App() {
       analysis.clips.filter(
         (c) =>
           (scope === "all" || c.source_video_id === active) &&
-          `${c.name} ${c.notes} ${analysis.categories.find((t) => t.id === c.category_id)?.name || ""} ${analysis.source_videos.find((s) => s.id === c.source_video_id)?.display_name}`
+          `${c.name} ${c.notes} ${handballSearchText(c, language)} ${clipCategoryLabels(c, analysis.categories).join(" ")} ${analysis.source_videos.find((s) => s.id === c.source_video_id)?.display_name}`
             .toLowerCase()
             .includes(query.toLowerCase()),
       ),
-    [analysis, query, scope, active],
+    [analysis, query, scope, active, language],
   );
   const groups = useMemo(
     () =>
@@ -647,7 +916,7 @@ export function App() {
         ? [
             ...analysis.categories.map((c) => ({
               id: c.id,
-              name: c.name,
+              name: categoryLabel(c),
               color: c.color,
               clips: exportOrder(
                 analysis,
@@ -656,7 +925,7 @@ export function App() {
             })),
             {
               id: "",
-              name: "Ohne Kategorie",
+              name: t("Uncategorized"),
               color: "#808080",
               clips: exportOrder(
                 analysis,
@@ -667,7 +936,7 @@ export function App() {
         : [
             {
               id: "all",
-              name: sort === "time" ? "By start time" : "Creation order",
+              name: t(sort === "time" ? "By start time" : "Creation order"),
               color: "#808080",
               clips: [...visible].sort((a, b) =>
                 sort === "time"
@@ -676,7 +945,7 @@ export function App() {
               ),
             },
           ],
-    [analysis, visible, sort],
+    [analysis, visible, sort, language],
   );
   async function removeSource(s: SourceVideo) {
     const count = analysis.clips.filter(
@@ -684,9 +953,12 @@ export function App() {
     ).length;
     if (
       (await confirm(
-        "Remove Source video?",
-        `Remove “${s.display_name}” and its ${count} Clips from the Analysis? The video file stays on disk.`,
-        ["Cancel", "Remove"],
+        t("Remove Source video?"),
+        t(
+          "Remove “{name}” and its {count} Clips from the Analysis? The video file stays on disk.",
+          { name: s.display_name, count },
+        ),
+        [t("Cancel"), t("Remove")],
       )) !== 1
     )
       return;
@@ -718,11 +990,11 @@ export function App() {
     });
   async function startExport(options: ExportOptions) {
     setExporting(true);
-    setProgress({ percent: 0, message: "Preparing export" });
+    setProgress({ percent: 0, message: t("Preparing export") });
     try {
       const path = await window.desktop.export(document(), options);
       if (path) {
-        setNotice(`Export saved: ${path}`);
+        setNotice(t("Export saved: {path}", { path }));
         setExportClips(null);
       }
     } catch (e) {
@@ -740,8 +1012,17 @@ export function App() {
       onDrop={(e) => {
         e.preventDefault();
         if (
+          tourFrom === null &&
           !busy &&
           ready &&
+          !playerExportClips &&
+          !projectsOpen &&
+          !settingsOpen &&
+          !setupOpen &&
+          !categoryDialog &&
+          !batchTags &&
+          !captureSettings &&
+          !rename &&
           !confirmation &&
           !exportClips &&
           !annotationSession &&
@@ -757,11 +1038,16 @@ export function App() {
         }
       }}
     >
-      <header className={`toolbar platform-${window.desktop.platform}`}>
+      <header
+        className={`toolbar platform-${window.desktop.platform}`}
+        inert={tourFrom !== null}
+        aria-hidden={tourFrom !== null || undefined}
+      >
         <input
+          data-tour="project"
           className="analysis-title"
-          aria-label="Analysis title"
-          placeholder="Untitled Analysis"
+          aria-label={t("Analysis title")}
+          placeholder={t("Untitled Analysis")}
           value={analysis.title}
           disabled={!ready || busy}
           onChange={(e) =>
@@ -770,70 +1056,177 @@ export function App() {
             })
           }
         />
-        {dirty && <span className="dirty-dot" title="Unsaved changes" />}
+        {dirty && <span className="dirty-dot" title={t("Unsaved changes")} />}
         <span className="grow" />
         <button
-          title="New Analysis"
+          data-tour="projects"
+          title={t("Projects and collections")}
+          disabled={busy || !ready}
+          onClick={() => void command("projects")}
+        >
+          <FolderOpen size={16} />
+          {t(" Projects")}
+        </button>
+        <button
+          title={t("New Analysis")}
           onClick={() => void command("new")}
           disabled={busy || !ready}
         >
           <FilePlus2 size={16} />
         </button>
         <button
-          title="Open Analysis"
+          title={t("Open Analysis")}
           onClick={() => void command("open")}
           disabled={busy || !ready}
         >
           <FolderOpen size={16} />
         </button>
         <button
-          title="Save Analysis"
+          title={t("Save Analysis")}
           onClick={() => void command("save")}
           disabled={busy || !analysis.source_videos.length}
         >
           <Save size={16} />
         </button>
         <span className="divider" />
+        <div className="history-controls" data-tour="history">
+          <button
+            aria-label={t("Undo project edit")}
+            title={t("Undo {edit} (⌘/Ctrl+Z)", {
+              edit: t(history.current.past.at(-1)?.label || "project edit"),
+            })}
+            disabled={
+              busy ||
+              !ready ||
+              !!draft ||
+              pending !== null ||
+              !history.current.past.length
+            }
+            onClick={() => travel("undo")}
+          >
+            <Undo2 size={16} />
+          </button>
+          <button
+            aria-label={t("Redo project edit")}
+            title={t("Redo {edit} (⌘/Ctrl+Shift+Z)", {
+              edit: t(history.current.future.at(-1)?.label || "project edit"),
+            })}
+            disabled={
+              busy ||
+              !ready ||
+              !!draft ||
+              pending !== null ||
+              !history.current.future.length
+            }
+            onClick={() => travel("redo")}
+          >
+            <Redo2 size={16} />
+          </button>
+        </div>
         <button onClick={() => void command("add")} disabled={busy || !ready}>
           <Plus size={15} />
-          Add video
+          {t("Add video")}
         </button>
         <button
+          data-tour="export"
           className="export-button"
           onClick={showExport}
           disabled={!analysis.clips.length || busy}
         >
           <Download size={15} />
-          Export{checked.length ? ` (${checked.length})` : ""}
+          {t("Export")}
+          {checked.length ? ` (${checked.length})` : ""}
         </button>
-        <Select
-          label="Analysis actions"
-          value=""
-          display="···"
-          options={[
-            { value: "save-as", label: "Save Analysis as…" },
-            { value: "categories", label: "Manage Categories" },
-            { value: "template", label: "Category template" },
-          ]}
-          onChange={(action) => void command(action)}
-          disabled={busy || !ready}
-        />
+        <div data-tour="project-setup">
+          <Select
+            label={t("Analysis actions")}
+            value=""
+            display="···"
+            options={[
+              { value: "save-as", label: t("Save Analysis as…") },
+              {
+                value: "setup",
+                label: t("Project setup · roster & templates"),
+              },
+              { value: "categories", label: t("Manage Categories") },
+              { value: "template", label: t("Category template") },
+            ]}
+            onChange={(action) => void command(action)}
+            disabled={busy || !ready}
+          />
+        </div>
+        <button
+          title={t("Settings")}
+          aria-label={t("Settings")}
+          className="settings-command"
+          data-tour="settings"
+          disabled={busy || !ready || !!draft || pending !== null}
+          onClick={() => void command("settings")}
+        >
+          <Settings2 size={17} />
+        </button>
+        <div data-tour="appearance" className="appearance-control">
+          <Select
+            label={t("Appearance")}
+            value={theme}
+            display={
+              theme === "system" ? (
+                <Monitor size={16} />
+              ) : theme === "light" ? (
+                <Sun size={16} />
+              ) : (
+                <Moon size={16} />
+              )
+            }
+            options={[
+              { value: "system", label: t("System appearance") },
+              { value: "light", label: t("Light appearance") },
+              { value: "dark", label: t("Dark appearance") },
+            ]}
+            onChange={(value) => setTheme(value as "system" | "light" | "dark")}
+          />
+        </div>
+        <button
+          title={t("Welcome tour")}
+          aria-label={t("Welcome tour")}
+          disabled={
+            !ready ||
+            busy ||
+            !!draft ||
+            pending !== null ||
+            !!annotationSession ||
+            !!exportClips ||
+            !!categoryDialog ||
+            captureSettings ||
+            batchTags ||
+            playlistModal ||
+            !!rename ||
+            !!confirmation ||
+            projectsOpen ||
+            settingsOpen ||
+            setupOpen ||
+            !!playerExportClips
+          }
+          onClick={startTour}
+        >
+          <CircleHelp size={17} />
+        </button>
         {window.desktop.platform !== "darwin" && (
           <div className="window-controls">
             <button
-              title="Minimize window"
+              title={t("Minimize window")}
               onClick={() => window.desktop.windowControl("minimize")}
             >
               −
             </button>
             <button
-              title="Maximize or restore window"
+              title={t("Maximize or restore window")}
               onClick={() => window.desktop.windowControl("maximize")}
             >
               □
             </button>
             <button
-              title="Close window"
+              title={t("Close window")}
               onClick={() => window.desktop.windowControl("close")}
             >
               <X size={15} />
@@ -841,23 +1234,30 @@ export function App() {
           </div>
         )}
       </header>
-      <div className="workspace">
-        <aside className="sidebar">
+      <div
+        className="workspace"
+        inert={tourFrom !== null}
+        aria-hidden={tourFrom !== null || undefined}
+      >
+        <aside className="sidebar" data-tour="sidebar">
           <nav className="sidebar-tabs">
             <button
               className={tab === "clips" ? "active" : ""}
               onClick={() => setTab("clips")}
             >
-              Clips <span>{analysis.clips.length}</span>
+              {t("Clips ")}
+              <span>{analysis.clips.length}</span>
             </button>
             <button
               className={tab === "videos" ? "active" : ""}
               onClick={() => setTab("videos")}
             >
-              Videos <span>{analysis.source_videos.length}</span>
+              {t("Videos ")}
+              <span>{analysis.source_videos.length}</span>
             </button>
             <button
-              title="Manage Categories"
+              data-tour="categories"
+              title={t("Manage Categories")}
               className="settings-button"
               onClick={() => void command("categories")}
             >
@@ -867,7 +1267,13 @@ export function App() {
               className={tab === "playlists" ? "active" : ""}
               onClick={() => setTab("playlists")}
             >
-              Playlists
+              {t("Playlists")}
+            </button>
+            <button
+              className={tab === "handball" ? "active" : ""}
+              onClick={() => setTab("handball")}
+            >
+              {t("Handball")}
             </button>
           </nav>
           {tab === "clips" ? (
@@ -876,35 +1282,38 @@ export function App() {
                 <div className="search">
                   <Search size={14} />
                   <input
-                    aria-label="Search Clips"
-                    placeholder="Search Clips and notes…"
+                    aria-label={t("Search Clips")}
+                    placeholder={t("Search Clips and notes…")}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
                   {query && (
-                    <button title="Clear search" onClick={() => setQuery("")}>
+                    <button
+                      title={t("Clear search")}
+                      onClick={() => setQuery("")}
+                    >
                       <X size={12} />
                     </button>
                   )}
                 </div>
                 <div className="row">
                   <Select
-                    label="Clip scope"
+                    label={t("Clip scope")}
                     value={scope}
                     onChange={setScope}
                     options={[
-                      { value: "all", label: "All videos" },
-                      { value: "active", label: "Active video" },
+                      { value: "all", label: t("All videos") },
+                      { value: "active", label: t("Active video") },
                     ]}
                   />
                   <Select
-                    label="Clip sort"
+                    label={t("Clip sort")}
                     value={sort}
                     onChange={setSort}
                     options={[
-                      { value: "category", label: "By Category" },
-                      { value: "time", label: "By start time" },
-                      { value: "creation", label: "Creation order" },
+                      { value: "category", label: t("By Category") },
+                      { value: "time", label: t("By start time") },
+                      { value: "creation", label: t("Creation order") },
                     ]}
                   />
                 </div>
@@ -913,16 +1322,18 @@ export function App() {
                 {!analysis.clips.length && (
                   <div className="sidebar-empty">
                     <Scissors size={24} />
-                    <p>No Clips yet</p>
+                    <p>{t("No Clips yet")}</p>
                     <small>
-                      Press <kbd>M</kbd> to mark a start,
+                      {t("Press ")}
+                      <kbd>{t("M")}</kbd>
+                      {t(" to mark a start,")}
                       <br />
-                      then again to mark the end.
+                      {t("then again to mark the end.")}
                     </small>
                   </div>
                 )}
                 {!!analysis.clips.length && !visible.length && (
-                  <p className="sidebar-empty">No matching Clips</p>
+                  <p className="sidebar-empty">{t("No matching Clips")}</p>
                 )}
                 {groups.map(
                   (group) =>
@@ -974,7 +1385,9 @@ export function App() {
                               {selecting && (
                                 <input
                                   type="checkbox"
-                                  aria-label={`Select ${c.name} for export`}
+                                  aria-label={t("Select {name} for export", {
+                                    name: c.name,
+                                  })}
                                   checked={checked.includes(c.id)}
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) =>
@@ -988,6 +1401,32 @@ export function App() {
                               )}
                               <div className="clip-info">
                                 <strong title={c.name}>{c.name}</strong>
+                                {clipCategoryIds(c).length > 1 && (
+                                  <small className="clip-extra-tags">
+                                    {clipCategoryLabels(
+                                      c,
+                                      analysis.categories,
+                                    ).join(" · ")}
+                                  </small>
+                                )}
+                                {c.handball && (
+                                  <small>
+                                    {[
+                                      c.handball.team,
+                                      c.handball.player,
+                                      c.handball.outcome
+                                        ? t(
+                                            handballLabel(
+                                              "outcome",
+                                              c.handball.outcome,
+                                            ),
+                                          )
+                                        : undefined,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </small>
+                                )}
                                 {analysis.source_videos.length > 1 && (
                                   <small>
                                     {
@@ -1002,7 +1441,7 @@ export function App() {
                                 {timecode(c.start_ms, false)}
                               </span>
                               <button
-                                title={`Edit ${c.name}`}
+                                title={t("Edit {name}", { name: c.name })}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   void editClip(c);
@@ -1019,12 +1458,15 @@ export function App() {
               <div className="sidebar-footer">
                 {!selecting ? (
                   <>
-                    <span className="muted">{visible.length} Clips</span>
+                    <span className="muted">
+                      {visible.length}
+                      {t(" Clips")}
+                    </span>
                     <button
                       disabled={!analysis.clips.length}
                       onClick={() => setSelecting(true)}
                     >
-                      Select clips
+                      {t("Select clips")}
                     </button>
                   </>
                 ) : (
@@ -1032,7 +1474,7 @@ export function App() {
                     <label className="checkbox-label">
                       <input
                         type="checkbox"
-                        aria-label="Select all visible Clips"
+                        aria-label={t("Select all visible Clips")}
                         checked={
                           visible.length > 0 &&
                           visible.every((c) => checked.includes(c.id))
@@ -1053,16 +1495,19 @@ export function App() {
                         }
                       />
                       {checked.length
-                        ? `${checked.length} selected`
-                        : "Select all"}
+                        ? t("{count} selected", { count: checked.length })
+                        : t("Select all")}
                     </label>
                     <Select
-                      label="Add selected Clips to playlist"
+                      label={t("Add selected Clips to playlist")}
                       display={<ListPlus size={15} />}
                       value=""
                       disabled={!checked.length}
                       options={[
-                        { value: "new", label: "New playlist from selection" },
+                        {
+                          value: "new",
+                          label: t("New playlist from selection"),
+                        },
                         ...analysis.playlists.map((p) => ({
                           value: p.id,
                           label: p.name,
@@ -1074,7 +1519,9 @@ export function App() {
                           if (id === "new")
                             a.playlists.push({
                               id: target,
-                              name: `Playlist ${a.playlists.length + 1}`,
+                              name: t("Playlist {count}", {
+                                count: a.playlists.length + 1,
+                              }),
                               clip_ids: [...checked],
                             });
                           else {
@@ -1092,15 +1539,24 @@ export function App() {
                       }}
                     />
                     <button
-                      title="Delete selected Clips"
+                      title={t("Tag selected Clips")}
+                      disabled={!checked.length || !!draft || pending !== null}
+                      onClick={() => setBatchTags(true)}
+                    >
+                      {t("Tag")}
+                    </button>
+                    <button
+                      title={t("Delete selected Clips")}
                       disabled={!checked.length}
                       onClick={() =>
                         void run(async () => {
                           if (
                             (await confirm(
-                              "Delete selected Clips?",
-                              `Delete ${checked.length} Clips from the Analysis?`,
-                              ["Cancel", "Delete Clips"],
+                              t("Delete selected Clips?"),
+                              t("Delete {count} Clips from the Analysis?", {
+                                count: checked.length,
+                              }),
+                              [t("Cancel"), t("Delete Clips")],
                             )) === 1
                           ) {
                             change((a) => {
@@ -1124,12 +1580,92 @@ export function App() {
                         setChecked([]);
                       }}
                     >
-                      Done
+                      {t("Done")}
                     </button>
                   </>
                 )}
               </div>
             </>
+          ) : tab === "handball" ? (
+            <HandballPanel
+              key={analysis.id}
+              analysis={analysis}
+              canReview={!draft && pending === null && !busy && ready}
+              onViews={(views) =>
+                change((a) => {
+                  if (views.length) a.handball_views = views;
+                  else delete a.handball_views;
+                })
+              }
+              onReview={(clips) =>
+                playPlaylist({
+                  id: "filtered-review",
+                  name: t("Filtered review"),
+                  clip_ids: clips.map((c) => c.id),
+                })
+              }
+              onPlayerExports={(clips) => setPlayerExportClips(clips)}
+              onPlayerReviews={(groups) => {
+                const playlists = groups.map((g) => ({
+                  id: crypto.randomUUID(),
+                  name: g.name,
+                  clip_ids: g.clips.map((c) => c.id),
+                }));
+                change((a) => a.playlists.push(...playlists));
+                setPlaylistId(playlists[0]?.id || null);
+                setTab("playlists");
+                setNotice(
+                  t("Created {count} player review playlists", {
+                    count: playlists.length,
+                  }),
+                );
+              }}
+              onReport={(clips, format) =>
+                void run(async () => {
+                  if (!window.desktop.report)
+                    throw new Error(
+                      t(
+                        "Reports are unavailable. Restart the updated desktop app.",
+                      ),
+                    );
+                  const path = await window.desktop.report(
+                    document(),
+                    clips.map((c) => c.id),
+                    format,
+                  );
+                  if (path)
+                    setNotice(
+                      t("Saved {format} report · {path}", {
+                        format: format.toUpperCase(),
+                        path,
+                      }),
+                    );
+                })
+              }
+              onSelect={(clip) => void editClip(clip)}
+              onPlaylist={(name, clips) => {
+                const id = crypto.randomUUID();
+                change((a) =>
+                  a.playlists.push({
+                    id,
+                    name: name.slice(0, 120),
+                    clip_ids: clips.map((c) => c.id),
+                  }),
+                );
+                setPlaylistId(id);
+                setTab("playlists");
+                setNotice(
+                  t("Created {name} with {count} Clips", {
+                    name,
+                    count: clips.length,
+                  }),
+                );
+              }}
+              onExport={(clips) => {
+                stopPlaylist();
+                setExportClips(clips);
+              }}
+            />
           ) : tab === "playlists" ? (
             <Playlists
               analysis={analysis}
@@ -1165,47 +1701,47 @@ export function App() {
                         <small>
                           {s.duration_ms != null
                             ? timecode(s.duration_ms, false)
-                            : "Duration unknown"}{" "}
+                            : t("Duration unknown")}{" "}
                           ·{" "}
                           {
                             analysis.clips.filter(
                               (c) => c.source_video_id === s.id,
                             ).length
                           }{" "}
-                          Clips
+                          {t("Clips")}
                         </small>
                       </span>
                       {active === s.id && <Check size={14} />}
                     </button>
                     <div className="source-actions">
                       <button
-                        title="Rename Source video"
+                        title={t("Rename Source video")}
                         onClick={() => setRename({ ...s })}
                       >
                         <Pencil size={13} />
                       </button>
                       <button
-                        title="Relink Source video"
+                        title={t("Relink Source video")}
                         onClick={() => void run(() => relink(s))}
                       >
                         <Link size={13} />
                       </button>
                       <button
-                        title="Move video earlier"
+                        title={t("Move video earlier")}
                         disabled={!i}
                         onClick={() => moveSource(i, -1)}
                       >
                         <ArrowUp size={13} />
                       </button>
                       <button
-                        title="Move video later"
+                        title={t("Move video later")}
                         disabled={i === analysis.source_videos.length - 1}
                         onClick={() => moveSource(i, 1)}
                       >
                         <ArrowDown size={13} />
                       </button>
                       <button
-                        title="Remove Source video"
+                        title={t("Remove Source video")}
                         onClick={() => void run(() => removeSource(s))}
                       >
                         <Trash2 size={13} />
@@ -1214,13 +1750,15 @@ export function App() {
                   </div>
                 ))}
                 {!analysis.source_videos.length && (
-                  <p className="sidebar-empty">Source videos appear here.</p>
+                  <p className="sidebar-empty">
+                    {t("Source videos appear here.")}
+                  </p>
                 )}
               </div>
               <div className="sidebar-footer">
                 <button onClick={() => void command("add")}>
                   <Plus size={14} />
-                  Add Source video
+                  {t("Add Source video")}
                 </button>
               </div>
             </>
@@ -1229,6 +1767,7 @@ export function App() {
         <Player
           ref={player}
           sequence={sequence}
+          jumpSeconds={jumpSeconds}
           onSequenceEnd={nextPlaylistClip}
           onSequenceCancel={stopPlaylist}
           source={source}
@@ -1254,9 +1793,13 @@ export function App() {
           }
           onMark={mark}
           captureDisabled={!!draft || !!queue}
+          onTagPlay={tagPlay}
           onQuickTag={quickTag}
           onCaptureSettings={() => setCaptureSettings(true)}
           onAdd={() => void command("add")}
+          onOpen={() => void command("open")}
+          onTour={startTour}
+          tourSeen={tourSeen}
           onCancelPending={() => setPending(null)}
           onRelink={() => {
             if (source) void run(() => relink(source));
@@ -1267,7 +1810,13 @@ export function App() {
           <ClipEditor
             key={draft.id}
             clip={draft}
+            source={analysis.source_videos.find(
+              (s) => s.id === draft.source_video_id,
+            )}
+            documentPath={file}
             categories={analysis.categories}
+            clips={analysis.clips}
+            roster={analysis.roster}
             duration={
               analysis.source_videos.find((s) => s.id === draft.source_video_id)
                 ?.duration_ms ?? null
@@ -1286,7 +1835,7 @@ export function App() {
                   if (index >= 0) a.clips[index] = clip;
                   else a.clips.push(clip);
                 });
-                setAnalysis(result);
+                commitAnalysis(result);
                 setSelected(clip.id);
                 setDraft(null);
                 setTab("clips");
@@ -1297,15 +1846,130 @@ export function App() {
           />
         )}
       </div>
+      {settingsOpen && (
+        <Settings
+          theme={theme}
+          onTheme={setTheme}
+          capture={captureWindow}
+          onCapture={setCaptureWindow}
+          jump={jumpSeconds}
+          onJump={setJumpSeconds}
+          onClose={() => setSettingsOpen(false)}
+          onTour={() => {
+            setSettingsOpen(false);
+            stopPlaylist();
+            player.current?.pause();
+            setTourFrom(tab);
+          }}
+        />
+      )}
+      {playerExportClips && (
+        <PlayerExports
+          clips={playerExportClips}
+          running={exporting}
+          progress={progress}
+          onClose={() => setPlayerExportClips(null)}
+          onCancel={() => void window.desktop.cancelExport()}
+          onExport={(options) =>
+            void run(async () => {
+              if (!window.desktop.playerExports)
+                throw new Error(
+                  t("Restart the updated app to export player videos."),
+                );
+              setExporting(true);
+              setProgress({
+                percent: 0,
+                message: t("Preparing player videos"),
+              });
+              try {
+                const result = await window.desktop.playerExports(
+                  document(),
+                  options,
+                );
+                if (result) {
+                  setNotice(
+                    t(
+                      "{status}: {completed}/{total} player videos · {directory}",
+                      {
+                        status: t(result.cancelled ? "Stopped" : "Finished"),
+                        completed: result.completed,
+                        total: result.total,
+                        directory: result.directory,
+                      },
+                    ),
+                  );
+                  setPlayerExportClips(null);
+                }
+              } finally {
+                setExporting(false);
+              }
+            })
+          }
+        />
+      )}
+      {projectsOpen && (
+        <ProjectLibrary
+          onClose={() => setProjectsOpen(false)}
+          onOpen={async (path) => {
+            let done = false;
+            await run(async () => {
+              if (!(await mayLeave())) return;
+              const data = await window.desktop.openProject!(path);
+              clearRecoveryTimer();
+              await window.desktop.recovery(null);
+              replace(data);
+              done = true;
+            });
+            return done;
+          }}
+          onCollection={async (paths, title) => {
+            let done = false;
+            await run(async () => {
+              if (!(await mayLeave())) return;
+              const data = await window.desktop.createCollection!(paths, title);
+              clearRecoveryTimer();
+              await window.desktop.recovery(null);
+              replace(data, true);
+              setTab("handball");
+              done = true;
+              setNotice(
+                t(
+                  "Collection created. Save it as a new project; the original projects stay unchanged.",
+                ),
+              );
+            });
+            return done;
+          }}
+        />
+      )}
+      {setupOpen && (
+        <ProjectSetup
+          analysis={analysis}
+          onClose={() => setSetupOpen(false)}
+          onSave={(next) => {
+            commitAnalysis(next, "project setup");
+            setCaptureContext((context) =>
+              syncRosterTag(context, next.roster || { teams: [], players: [] }),
+            );
+            setSetupOpen(false);
+          }}
+        />
+      )}
+      {tourFrom !== null && (
+        <WelcomeTour onNavigate={setTab} onClose={closeTour} />
+      )}
       <UpdateNotice
         updates={window.desktop.updates}
         onRestart={() => command("restart-update")}
       />
       {(notice || busy) && (
         <div className="notice-toast" role="status">
-          <span>{busy ? "Working…" : notice}</span>
+          <span>{busy ? t("Working…") : notice}</span>
           {!busy && (
-            <button title="Dismiss notification" onClick={() => setNotice("")}>
+            <button
+              title={t("Dismiss notification")}
+              onClick={() => setNotice("")}
+            >
               <X size={14} />
             </button>
           )}
@@ -1330,10 +1994,12 @@ export function App() {
                   ...frames,
                 ];
               });
-              setAnalysis(updated);
+              commitAnalysis(updated);
               setAnnotationSession(null);
               setNotice(
-                "Freeze-frames saved to Analysis; save the file to keep your changes.",
+                t(
+                  "Freeze-frames saved to Analysis; save the file to keep your changes.",
+                ),
               );
             } catch (e) {
               fail(e);
@@ -1341,18 +2007,71 @@ export function App() {
           }}
         />
       )}
+      {batchTags && (
+        <BatchHandball
+          roster={analysis.roster}
+          clips={analysis.clips.filter((c) => checked.includes(c.id))}
+          onCancel={() => setBatchTags(false)}
+          onApply={(tag, clear) => {
+            change((a) => {
+              for (const clip of a.clips)
+                if (checked.includes(clip.id)) {
+                  if (clear) delete clip.handball;
+                  else
+                    clip.handball = mergeHandballTag(clip.handball, tag || {});
+                }
+            });
+            setBatchTags(false);
+            setNotice(t("Updated {count} Clips", { count: checked.length }));
+          }}
+        />
+      )}
       {captureSettings && (
-        <Modal title="Quick capture" onClose={() => setCaptureSettings(false)}>
+        <Modal
+          title={t("Quick capture")}
+          onClose={() => setCaptureSettings(false)}
+        >
           <div className="modal-body">
             <p>
-              Press 1–9 to capture a Clip in the matching Category without
-              pausing. Manual marking with M stays independent.
+              {t(
+                "Press 1–9 to capture a Clip in the matching Category without pausing. Manual marking with M stays independent.",
+              )}
             </p>
+            <div
+              className="capture-presets"
+              role="group"
+              aria-label={t("Capture presets")}
+            >
+              {[
+                { name: "Short", before: 4, after: 2 },
+                { name: "Play", before: 8, after: 3 },
+                { name: "Possession", before: 20, after: 5 },
+              ].map((p) => (
+                <button
+                  key={p.name}
+                  aria-pressed={
+                    captureWindow.before === p.before &&
+                    captureWindow.after === p.after
+                  }
+                  onClick={() =>
+                    setCaptureWindow({ before: p.before, after: p.after })
+                  }
+                >
+                  {t(p.name)}
+                  <small>
+                    {p.before}
+                    {t("s before · ")}
+                    {p.after}
+                    {t("s after")}
+                  </small>
+                </button>
+              ))}
+            </div>
             <div className="capture-window">
               <label>
-                Seconds before
+                {t("Seconds before")}
                 <input
-                  aria-label="Seconds before"
+                  aria-label={t("Seconds before")}
                   type="number"
                   min="0"
                   max="120"
@@ -1366,9 +2085,9 @@ export function App() {
                 />
               </label>
               <label>
-                Seconds after
+                {t("Seconds after")}
                 <input
-                  aria-label="Seconds after"
+                  aria-label={t("Seconds after")}
                   type="number"
                   min="0"
                   max="120"
@@ -1382,11 +2101,53 @@ export function App() {
                 />
               </label>
             </div>
+            <details className="navigation-settings">
+              <summary>{t("Navigation settings")}</summary>
+              <label>
+                {t("Jump interval (seconds)")}
+                <input
+                  aria-label={t("Jump interval (seconds)")}
+                  type="number"
+                  min={1}
+                  max={120}
+                  step={1}
+                  value={jumpSeconds}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isInteger(n) && n >= 1 && n <= 120)
+                      setJumpSeconds(n);
+                  }}
+                />
+              </label>
+              <p className="muted">
+                {t(
+                  "Used by the back/forward buttons and Shift + arrow keys. Remembered on this device.",
+                )}
+              </p>
+            </details>
             {captureWindow.before + captureWindow.after === 0 && (
               <p className="inline-error" role="alert">
-                Choose at least one second of context.
+                {t("Choose at least one second of context.")}
               </p>
             )}
+            <details className="handball-tags">
+              <summary>
+                {t("Handball capture context")}
+                {captureContext ? t(" · active") : ""}
+              </summary>
+              <p className="muted">
+                {t(
+                  "Applied to new quick captures and manually marked Clips in this Analysis. Record each outcome in the Clip editor.",
+                )}
+              </p>
+              <HandballFields
+                roster={analysis.roster}
+                contextOnly
+                value={captureContext}
+                clips={analysis.clips}
+                onChange={setCaptureContext}
+              />
+            </details>
             <div className="capture-key-list">
               {analysis.categories.map((category, index) => (
                 <div key={category.id}>
@@ -1394,20 +2155,24 @@ export function App() {
                     className="color-dot"
                     style={{ background: category.color }}
                   />
-                  <span>{category.name}</span>
-                  <kbd>{index < 9 ? index + 1 : "Tag menu"}</kbd>
+                  <span>{categoryLabel(category)}</span>
+                  <kbd>
+                    {categoryShortcut(analysis.categories, category) ||
+                      t("Tag menu")}
+                  </kbd>
                 </div>
               ))}
             </div>
             <p className="muted">
-              Clips are trimmed at the video boundaries. Category order
-              determines the shortcuts. Settings are remembered on this device.
+              {t(
+                "Clips are trimmed at the video boundaries. Manage Categories assigns shortcut keys. Timing settings are remembered on this device.",
+              )}
             </p>
             <button
               disabled={captureWindow.before + captureWindow.after === 0}
               onClick={() => setCaptureSettings(false)}
             >
-              Done
+              {t("Done")}
             </button>
           </div>
         </Modal>
@@ -1415,7 +2180,7 @@ export function App() {
       {error && (
         <div className="error-toast" role="alert">
           <span>{error}</span>
-          <button title="Dismiss error" onClick={() => setError("")}>
+          <button title={t("Dismiss error")} onClick={() => setError("")}>
             <X size={16} />
           </button>
         </div>
@@ -1423,7 +2188,7 @@ export function App() {
       {!ready && !confirmation && (
         <div className="loading-shade">
           <span className="spinner" />
-          Opening Analysis…
+          {t("Opening Analysis…")}
         </div>
       )}
       {confirmation && (
@@ -1457,20 +2222,34 @@ export function App() {
             if (categoryDialog.template)
               await window.desktop.template(categories);
             else {
-              setAnalysis(
+              commitAnalysis(
                 mutate(analysis, (a) => {
                   a.categories = categories;
-                  a.clips.forEach((c) => {
-                    if (!categories.some((t) => t.id === c.category_id))
-                      c.category_id = null;
-                  });
+                  for (const view of a.handball_views || []) {
+                    if (!view.category_ids) continue;
+                    view.category_ids = view.category_ids.filter((id) =>
+                      categories.some((c) => c.id === id),
+                    );
+                    if (!view.category_ids.length) delete view.category_ids;
+                  }
+                  a.clips = a.clips.map((clip) =>
+                    withClipCategories(
+                      clip,
+                      clipCategoryIds(clip).filter((id) =>
+                        categories.some((c) => c.id === id),
+                      ),
+                    ),
+                  );
                 }),
               );
               setDraft((current) =>
-                current &&
-                current.category_id &&
-                !categories.some((c) => c.id === current.category_id)
-                  ? { ...current, category_id: null }
+                current
+                  ? withClipCategories(
+                      current,
+                      clipCategoryIds(current).filter((id) =>
+                        categories.some((c) => c.id === id),
+                      ),
+                    )
                   : current,
               );
             }
@@ -1490,7 +2269,7 @@ export function App() {
         />
       )}
       {rename && (
-        <Modal title="Rename Source video" onClose={() => setRename(null)}>
+        <Modal title={t("Rename Source video")} onClose={() => setRename(null)}>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1506,7 +2285,7 @@ export function App() {
           >
             <div className="modal-body">
               <label>
-                Display name
+                {t("Display name")}
                 <input
                   autoFocus
                   required
@@ -1519,9 +2298,9 @@ export function App() {
             </div>
             <div className="modal-footer">
               <button type="button" onClick={() => setRename(null)}>
-                Cancel
+                {t("Cancel")}
               </button>
-              <button className="primary">Rename</button>
+              <button className="primary">{t("Rename")}</button>
             </div>
           </form>
         </Modal>

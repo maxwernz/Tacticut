@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { handballSchema } from "./handball";
+import { rosterSchema } from "./roster";
 
 const id = z
   .string()
@@ -14,6 +16,8 @@ export const categorySchema = z.object({
   id,
   name: z.string().trim().min(1),
   color: nonblank,
+  group: z.string().trim().min(1).max(80).optional(),
+  shortcut: z.number().int().min(1).max(9).nullable().optional(),
 });
 export const sourceSchema = z.object({
   id,
@@ -24,16 +28,32 @@ export const sourceSchema = z.object({
   byte_size: ms.nullable().default(null),
   fingerprint: z.string().nullable().default(null),
 });
-export const clipSchema = z.object({
-  id,
-  source_video_id: id,
-  name: nonblank,
-  start_ms: ms,
-  end_ms: ms,
-  notes: z.string(),
-  category_id: id.nullable(),
-  creation_order: ms,
-});
+export const clipSchema = z
+  .object({
+    id,
+    source_video_id: id,
+    name: nonblank,
+    start_ms: ms,
+    end_ms: ms,
+    notes: z.string(),
+    category_id: id.nullable(),
+    category_ids: z.array(id).min(2).max(100).optional(),
+    creation_order: ms,
+    handball: handballSchema.optional(),
+  })
+  .superRefine((clip, ctx) => {
+    if (!clip.category_ids) return;
+    if (new Set(clip.category_ids).size !== clip.category_ids.length)
+      ctx.addIssue({
+        code: "custom",
+        message: "Clip Categories must be unique",
+      });
+    if (clip.category_id !== clip.category_ids[0])
+      ctx.addIssue({
+        code: "custom",
+        message: "The primary Category must be the first selected Category",
+      });
+  });
 export const playlistSchema = z.object({
   id,
   name: z.string().trim().min(1).max(120),
@@ -43,7 +63,9 @@ const coordinate = z.number().finite().min(0).max(1);
 export const drawingSchema = z
   .object({
     id,
-    kind: z.enum(["arrow", "circle"]),
+    kind: z.enum(["arrow", "circle", "line", "text"]),
+    text: z.string().trim().min(1).max(160).optional(),
+    font_size: z.number().finite().min(0.02).max(0.12).optional(),
     x1: coordinate,
     y1: coordinate,
     x2: coordinate,
@@ -53,9 +75,11 @@ export const drawingSchema = z
   })
   .refine(
     (s) =>
-      s.kind === "circle"
-        ? Math.abs(s.x2 - s.x1) >= 0.005 && Math.abs(s.y2 - s.y1) >= 0.005
-        : Math.hypot(s.x2 - s.x1, s.y2 - s.y1) >= 0.005,
+      s.kind === "text"
+        ? !!s.text && s.font_size !== undefined && s.x2 > s.x1 && s.y2 > s.y1
+        : s.kind === "circle"
+          ? Math.abs(s.x2 - s.x1) >= 0.005 && Math.abs(s.y2 - s.y1) >= 0.005
+          : Math.hypot(s.x2 - s.x1, s.y2 - s.y1) >= 0.005,
     "Drawing is too small",
   );
 export const freezeFrameSchema = z.object({
@@ -65,6 +89,23 @@ export const freezeFrameSchema = z.object({
   hold_ms: z.number().int().min(500).max(15000),
   shapes: z.array(drawingSchema).min(1).max(100),
 });
+export const handballViewSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(80),
+  filters: handballSchema,
+  query: z.string().max(300),
+  source_video_id: id.nullable(),
+  category_ids: z
+    .array(id)
+    .max(100)
+    .refine(
+      (ids) => new Set(ids).size === ids.length,
+      "Saved-view Categories must be unique",
+    )
+    .optional(),
+});
+export type HandballView = z.infer<typeof handballViewSchema>;
+
 export const analysisSchema = z
   .object({
     id,
@@ -74,6 +115,8 @@ export const analysisSchema = z
     clips: z.array(clipSchema),
     playlists: z.array(playlistSchema).default([]),
     freeze_frames: z.array(freezeFrameSchema).max(10000).default([]),
+    handball_views: z.array(handballViewSchema).max(100).optional(),
+    roster: rosterSchema.optional(),
   })
   .superRefine((a, ctx) => {
     const problem = (message: string) =>
@@ -84,13 +127,11 @@ export const analysisSchema = z
       a.clips,
       a.playlists,
       a.freeze_frames,
+      a.handball_views || [],
     ])
       if (new Set(rows.map((r) => r.id)).size !== rows.length)
         problem("Entity identities must be unique");
-    if (
-      new Set(a.categories.map((c) => normalizeName(c.name))).size !==
-      a.categories.length
-    )
+    if (new Set(a.categories.map(categoryKey)).size !== a.categories.length)
       problem("Category names must be unique");
     if (
       new Set(a.source_videos.map((s) => s.location)).size !==
@@ -105,7 +146,11 @@ export const analysisSchema = z
     a.clips.forEach((c, i) => {
       const source = a.source_videos.find((s) => s.id === c.source_video_id);
       if (!source) problem("Clip refers to an unknown Source video");
-      if (c.category_id && !a.categories.some((t) => t.id === c.category_id))
+      if (
+        clipCategoryIds(c).some(
+          (categoryId) => !a.categories.some((t) => t.id === categoryId),
+        )
+      )
         problem("Clip refers to an unknown Category");
       if (c.end_ms <= c.start_ms) problem("Clip end must be after its start");
       if (source?.duration_ms != null && c.end_ms > source.duration_ms)
@@ -113,6 +158,37 @@ export const analysisSchema = z
       if (c.creation_order !== i)
         problem("Clip creation order must be contiguous");
     });
+    for (const view of a.handball_views || [])
+      if (
+        view.category_ids?.some((id) => !a.categories.some((c) => c.id === id))
+      )
+        problem("Saved view refers to an unknown Category");
+    const shortcuts = a.categories
+      .map((c) => c.shortcut)
+      .filter((s) => s != null);
+    if (new Set(shortcuts).size !== shortcuts.length)
+      problem("Category shortcuts must be unique");
+    for (const tag of [
+      ...a.clips.map((c) => c.handball),
+      ...(a.handball_views || []).map((v) => v.filters),
+    ]) {
+      if (!tag) continue;
+      if (tag.team_id && !a.roster?.teams.some((t) => t.id === tag.team_id))
+        problem("Handball tag refers to an unknown roster team");
+      for (const role of ["player", "goalkeeper"] as const) {
+        const ref = tag[`${role}_id`];
+        const person = a.roster?.players.find((p) => p.id === ref);
+        if (ref && !person)
+          problem("Handball tag refers to an unknown roster player");
+        if (
+          role === "player" &&
+          person &&
+          tag.team_id &&
+          person.team_id !== tag.team_id
+        )
+          problem("Attacking player belongs to another team");
+      }
+    }
     const clipIds = new Set(a.clips.map((c) => c.id));
     for (const playlist of a.playlists) {
       if (new Set(playlist.clip_ids).size !== playlist.clip_ids.length)
@@ -150,6 +226,11 @@ export const defaults = [
 ];
 export const normalizeName = (name: string) =>
   name.trim().toLowerCase().replaceAll("ß", "ss").replaceAll("ς", "σ");
+export const categoryKey = (category: Pick<Category, "name" | "group">) =>
+  JSON.stringify([
+    normalizeName(category.group || ""),
+    normalizeName(category.name),
+  ]);
 export function newAnalysis(template = defaults): Analysis {
   return {
     id: crypto.randomUUID(),
@@ -173,7 +254,15 @@ export function decode(text: string): Analysis {
     );
   const envelope = z
     .object({
-      schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      schema_version: z.union([
+        z.literal(1),
+        z.literal(2),
+        z.literal(3),
+        z.literal(4),
+        z.literal(5),
+        z.literal(6),
+        z.literal(7),
+      ]),
       analysis: analysisSchema,
     })
     .parse(JSON.parse(text.replace(/^\uFEFF/, "")));
@@ -189,11 +278,29 @@ export function encode(a: Analysis): string {
   // Old Python versions reject v2 instead of silently dropping playlists on save.
   return (
     JSON.stringify(
-      freeze_frames.length
-        ? { schema_version: 3, analysis: validated }
-        : playlists.length
-          ? { schema_version: 2, analysis: { ...base, playlists } }
-          : { schema_version: 1, analysis: base },
+      validated.clips.some((clip) => clip.category_ids !== undefined) ||
+        validated.handball_views?.some((view) => view.category_ids?.length)
+        ? { schema_version: 7, analysis: validated }
+        : validated.roster ||
+            validated.categories.some(
+              (c) => c.group || c.shortcut !== undefined,
+            ) ||
+            validated.freeze_frames.some((f) =>
+              f.shapes.some((s) => s.kind === "text" || s.kind === "line"),
+            )
+          ? { schema_version: 6, analysis: validated }
+          : validated.handball_views?.length
+            ? { schema_version: 5, analysis: validated }
+            : validated.clips.some(
+                  (clip) =>
+                    clip.handball && Object.values(clip.handball).some(Boolean),
+                )
+              ? { schema_version: 4, analysis: validated }
+              : freeze_frames.length
+                ? { schema_version: 3, analysis: validated }
+                : playlists.length
+                  ? { schema_version: 2, analysis: { ...base, playlists } }
+                  : { schema_version: 1, analysis: base },
       null,
       2,
     ) + "\n"
@@ -217,6 +324,35 @@ export function mutate(
     (f) => !deletedIds.has(f.clip_id),
   );
   return analysisSchema.parse(draft);
+}
+/** The first Category stays the primary grouping/color for legacy workflows. */
+export function clipCategoryIds(
+  clip: Pick<Clip, "category_id" | "category_ids">,
+): string[] {
+  return clip.category_ids
+    ? [...clip.category_ids]
+    : clip.category_id
+      ? [clip.category_id]
+      : [];
+}
+/** Normalize UI selections without persisting redundant singleton arrays. */
+export function withClipCategories(clip: Clip, ids: string[]): Clip {
+  const categories = [...new Set(ids)];
+  const { category_ids: _oldCategories, ...base } = clip;
+  return {
+    ...base,
+    category_id: categories[0] || null,
+    ...(categories.length > 1 ? { category_ids: categories } : {}),
+  };
+}
+export function clipCategoryLabels(
+  clip: Pick<Clip, "category_id" | "category_ids">,
+  categories: Category[],
+): string[] {
+  return clipCategoryIds(clip).flatMap((id) => {
+    const category = categories.find((c) => c.id === id);
+    return category ? [categoryLabel(category)] : [];
+  });
 }
 export function playlistClips(a: Analysis, playlist: Playlist): Clip[] {
   const clips = new Map(a.clips.map((c) => [c.id, c]));
@@ -282,4 +418,20 @@ export function parseTimecode(text: string): number {
   if (parts.slice(1).some((p) => Number(p) >= 60))
     throw new Error("Minutes and seconds must be below 60");
   return Math.round(parts.reduce((v, p) => v * 60 + Number(p), 0) * 1000);
+}
+
+/** Explicit shortcuts disable positional fallback for the whole template. */
+export function categoryShortcut(
+  categories: Category[],
+  category: Category,
+): number | null {
+  if (categories.some((c) => c.shortcut !== undefined))
+    return category.shortcut ?? null;
+  const index = categories.findIndex((c) => c.id === category.id);
+  return index >= 0 && index < 9 ? index + 1 : null;
+}
+export function categoryLabel(category: Category): string {
+  return category.group
+    ? `${category.group} / ${category.name}`
+    : category.name;
 }

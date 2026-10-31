@@ -37,7 +37,7 @@ h4a-Spielnummer zugeordnet (`games.game_no`, dieselbe Nummer wie in Phönix).
 | `frame` | Einzelbild oder Ausschnitt, z. B. um die Hallenanzeige abzulesen |
 | `set_sync` | Anpfiffe und weitere Abgleichpunkte pro Spiel speichern |
 | `plan_clips` | Spielzeit → Videozeit, zum Prüfen |
-| `create_analysis` | `.analysis`-Datei für Tacticut (Datei → Öffnen) |
+| `create_analysis` | `.tcut`-Datei für Tacticut (Datei → Öffnen) |
 | `export_clips` | MP4, zusammengefügt und/oder einzeln, mit Clipname eingeblendet |
 
 ## Spielzeit und Videozeit

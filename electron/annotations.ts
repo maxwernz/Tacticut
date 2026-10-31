@@ -13,6 +13,7 @@ export async function renderFreezeFrame(
   width: number,
   height: number,
   signal: AbortSignal,
+  fontPath?: string,
 ) {
   const still = join(work, `freeze-${index}-source.png`),
     overlay = join(work, `freeze-${index}-overlay.png`),
@@ -43,7 +44,12 @@ export async function renderFreezeFrame(
   const w = png.readUInt32BE(16),
     h = png.readUInt32BE(20);
   if (signal.aborted) throw new Error("Export cancelled");
-  const renderer = new Resvg(annotationSvg(frame.shapes, w, h));
+  const renderer = new Resvg(annotationSvg(frame.shapes, w, h), {
+    font: {
+      loadSystemFonts: false,
+      ...(fontPath ? { fontFiles: [fontPath] } : {}),
+    },
+  });
   await writeFile(overlay, renderer.render().asPng());
   await run(
     ffmpeg,

@@ -347,7 +347,7 @@ server.registerTool(
   {
     title: "Tacticut-Analyse erstellen",
     description:
-      "Erstellt eine .analysis-Datei für Tacticut mit den Clips (Kategorien aus 'category', dazu eine Playlist). " +
+      "Erstellt eine .tcut-Datei für Tacticut mit den Clips (Kategorien aus 'category', dazu eine Playlist). " +
       "media 'excerpts' (Standard) lädt nur die benötigten Abschnitte mit etwas Puffer und fügt sie pro Spiel zu einer Datei zusammen; " +
       "'full' lädt das ganze Spielvideo (1–4 GB) und behält es für spätere Analysen. In Tacticut über Datei → Öffnen laden.",
     inputSchema: {
@@ -425,7 +425,7 @@ server.registerTool(
       }
       // Keep the requested order across games.
       analysisClips.sort((a, b) => a.order - b.order);
-      const file = await freeFile(folder, safeName(title), ".analysis");
+      const file = await freeFile(folder, safeName(title), ".tcut");
       await writeFile(file, buildAnalysis({ title, file, sources, clips: analysisClips, playlist }));
       return text(
         [`Analyse erstellt: ${file}`, `${analysisClips.length} Clips aus ${sources.length} Spiel(en). In Tacticut über Datei → Öffnen laden.`, ...sources.map((s) => `Video: ${s.path}`), ...warnings.map((w) => `Hinweis: ${w}`)].join("\n"),

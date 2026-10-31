@@ -71,9 +71,8 @@ it("edits a colored handball sequence and previews the chosen interval", () => {
   fireEvent.click(category);
   expect(category.getAttribute("aria-pressed")).toBe("true");
   expect(category.style.getPropertyValue("--category-color")).toBe("#EF4444");
-  fireEvent.click(screen.getByText("Handball coaching prompts"));
-  fireEvent.click(screen.getByRole("combobox", { name: "Add tactical phase" }));
-  fireEvent.click(screen.getByRole("option", { name: "Fast break" }));
+  fireEvent.click(screen.getByRole("button", { name: "Fast break" }));
+  fireEvent.click(screen.getByText(/Clip timing & preview/));
   fireEvent.click(screen.getByRole("button", { name: "Loop" }));
   fireEvent.click(screen.getByRole("button", { name: "Preview sequence" }));
   expect(preview).toHaveBeenCalledWith(1000, 4000, true);
@@ -81,11 +80,33 @@ it("edits a colored handball sequence and previews the chosen interval", () => {
   expect(save).toHaveBeenCalledWith(
     expect.objectContaining({
       category_id: "attack",
-      notes: "Phase: Fast break",
+      notes: "",
+      handball: { phase: "fast-break" },
       start_ms: 1000,
       end_ms: 4000,
     }),
   );
   ui.unmount();
   expect(stop).toHaveBeenCalled();
+});
+
+it("keeps an open dropdown attached when its editor scrolls after focus", () => {
+  render(
+    <div data-testid="scroll-editor">
+      <Select
+        label="Outcome"
+        value=""
+        options={[
+          { value: "", label: "Not recorded" },
+          { value: "goal", label: "Goal" },
+        ]}
+        onChange={vi.fn()}
+      />
+    </div>,
+  );
+  fireEvent.click(screen.getByRole("combobox", { name: "Outcome" }));
+  fireEvent.scroll(screen.getByTestId("scroll-editor"));
+  expect(screen.getByRole("listbox", { name: "Outcome" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: "Goal" }));
+  expect(screen.queryByRole("listbox")).toBeNull();
 });

@@ -1,7 +1,11 @@
+import { t, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
 import {
   categorySchema,
+  clipCategoryLabels,
+  categoryKey,
+  categoryShortcut,
   defaults,
   normalizeName,
   timecode,
@@ -23,16 +27,38 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  useLanguage();
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    const ownBackdrop = panel.current?.closest(".modal-backdrop");
+    const covered = [
+      ...document.querySelectorAll<HTMLElement>(".modal-backdrop"),
+    ]
+      .filter((element) => element !== ownBackdrop)
+      .map((element) => ({
+        element,
+        inert: element.inert,
+        hidden: element.getAttribute("aria-hidden"),
+      }));
+    covered.forEach(({ element }) => {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    });
     if (!panel.current?.contains(document.activeElement))
       panel.current
         ?.querySelector<HTMLElement>(
           "input:not(:disabled),button:not(:disabled),select:not(:disabled),textarea:not(:disabled)",
         )
         ?.focus();
-    return () => previous?.focus();
+    return () => {
+      covered.forEach(({ element, inert, hidden }) => {
+        element.inert = inert;
+        if (hidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", hidden);
+      });
+      previous?.focus();
+    };
   }, []);
   return (
     <div
@@ -70,7 +96,7 @@ export function Modal({
         <div className="panel-heading">
           <h2>{title}</h2>
           {onClose && (
-            <button aria-label="Close dialog" onClick={onClose}>
+            <button aria-label={t("Close dialog")} onClick={onClose}>
               <X size={18} />
             </button>
           )}
@@ -91,6 +117,7 @@ export function CategoryDialog({
   onSave(categories: Category[]): Promise<void>;
   onClose(): void;
 }) {
+  useLanguage();
   const [rows, setRows] = useState(structuredClone(initial)),
     [error, setError] = useState("");
   const update = (id: string, patch: Partial<Category>) =>
@@ -102,44 +129,87 @@ export function CategoryDialog({
   };
   return (
     <Modal
-      title={template ? "Category template" : "Analysis Categories"}
+      title={template ? t("Category template") : t("Analysis Categories")}
+      wide
       onClose={onClose}
     >
       <div className="modal-body">
         <p className="muted">
           {template
-            ? "Copied into new Analyses. Existing Analyses keep their Categories."
-            : "Categories are shared by all Source videos. Removing one keeps its Clips uncategorized."}
+            ? t(
+                "Copied into new Analyses. Existing Analyses keep their Categories.",
+              )
+            : t(
+                "Categories are shared by all Source videos. Removing one keeps its Clips uncategorized.",
+              )}
+        </p>
+        <p className="muted">
+          {t(
+            "Use an optional group for a two-level tagging system. Assign keys 1–9 to the categories you capture most often; unused categories remain available by clicking.",
+          )}
         </p>
         <div className="category-list">
           {rows.map((c, i) => (
             <div className="category-edit" key={c.id}>
               <ColorPicker
-                label={`Color for ${c.name}`}
+                label={t("Color for {name}", { name: c.name })}
                 value={/^#[0-9a-f]{6}$/i.test(c.color) ? c.color : "#808080"}
                 onChange={(color) => update(c.id, { color })}
               />
               <input
-                aria-label="Category name"
+                aria-label={t("Category name")}
                 value={c.name}
                 onChange={(e) => update(c.id, { name: e.target.value })}
               />
+              <input
+                aria-label={t("Group for {name}", { name: c.name })}
+                placeholder={t("Group (optional)")}
+                value={c.group || ""}
+                maxLength={80}
+                onChange={(e) =>
+                  update(c.id, { group: e.target.value || undefined })
+                }
+              />
+              <Select
+                label={t("Shortcut for {name}", { name: c.name })}
+                value={String(categoryShortcut(rows, c) || "")}
+                options={[
+                  { value: "", label: t("No key") },
+                  ...Array.from({ length: 9 }, (_, n) => ({
+                    value: String(n + 1),
+                    label: t("Key {number}", { number: n + 1 }),
+                  })),
+                ]}
+                onChange={(value) =>
+                  setRows(
+                    rows.map((row) => ({
+                      ...row,
+                      shortcut:
+                        row.id === c.id
+                          ? value
+                            ? Number(value)
+                            : null
+                          : categoryShortcut(rows, row),
+                    })),
+                  )
+                }
+              />
               <button
-                title="Move earlier"
+                title={t("Move earlier")}
                 disabled={!i}
                 onClick={() => move(i, -1)}
               >
                 <ArrowUp size={14} />
               </button>
               <button
-                title="Move later"
+                title={t("Move later")}
                 disabled={i === rows.length - 1}
                 onClick={() => move(i, 1)}
               >
                 <ArrowDown size={14} />
               </button>
               <button
-                title="Remove Category"
+                title={t("Remove Category")}
                 onClick={() => setRows(rows.filter((t) => t.id !== c.id))}
               >
                 <Trash2 size={14} />
@@ -157,7 +227,7 @@ export function CategoryDialog({
             }
           >
             <Plus size={14} />
-            Add Category
+            {t("Add Category")}
           </button>
           {template && (
             <button
@@ -167,7 +237,7 @@ export function CategoryDialog({
                 )
               }
             >
-              Restore defaults
+              {t("Restore defaults")}
             </button>
           )}
         </div>
@@ -178,24 +248,26 @@ export function CategoryDialog({
         )}
       </div>
       <div className="modal-footer">
-        <button onClick={onClose}>Cancel</button>
+        <button onClick={onClose}>{t("Cancel")}</button>
         <button
           className="primary"
           onClick={async () => {
             try {
               const parsed = rows.map((c) => categorySchema.parse(c));
-              if (
-                new Set(parsed.map((c) => normalizeName(c.name))).size !==
-                parsed.length
-              )
-                throw new Error("Category names must be unique");
+              if (new Set(parsed.map(categoryKey)).size !== parsed.length)
+                throw new Error(t("Category names must be unique"));
+              const shortcuts = parsed
+                .map((c) => c.shortcut)
+                .filter((s) => s != null);
+              if (new Set(shortcuts).size !== shortcuts.length)
+                throw new Error(t("Choose a different key for each Category."));
               await onSave(parsed);
             } catch (e) {
               setError((e as Error).message);
             }
           }}
         >
-          Save Categories
+          {t("Save Categories")}
         </button>
       </div>
     </Modal>
@@ -218,6 +290,7 @@ export function ExportDialog({
   onCancel(): void;
   onClose(): void;
 }) {
+  useLanguage();
   const [clips, setClips] = useState(initial);
   const [options, setOptions] = useState<Omit<ExportOptions, "ids">>({
     title: true,
@@ -226,6 +299,9 @@ export function ExportDialog({
     numbers: true,
     audio: false,
     annotations: true,
+    replay: false,
+    replaySpeed: 0.5,
+    handball: false,
     encoder: "auto",
     height: 1080,
   });
@@ -235,10 +311,14 @@ export function ExportDialog({
     setClips(next);
   };
   return (
-    <Modal title="Combined export" wide onClose={running ? undefined : onClose}>
+    <Modal
+      title={t("Combined export")}
+      wide
+      onClose={running ? undefined : onClose}
+    >
       <div className="modal-body">
         <p className="muted">
-          Reorder the Export list independently of your Analysis.
+          {t("Reorder the Export list independently of your Analysis.")}
         </p>
         <fieldset disabled={running}>
           <div className="export-list">
@@ -250,8 +330,8 @@ export function ExportDialog({
                 <div className="grow">
                   <strong>{c.name}</strong>
                   <small>
-                    {analysis.categories.find((t) => t.id === c.category_id)
-                      ?.name || "Ohne Kategorie"}{" "}
+                    {clipCategoryLabels(c, analysis.categories).join(" · ") ||
+                      t("Ohne Kategorie")}{" "}
                     ·{" "}
                     {
                       analysis.source_videos.find(
@@ -268,26 +348,29 @@ export function ExportDialog({
                         ? analysis.freeze_frames
                             .filter((f) => f.clip_id === c.id)
                             .reduce((n, f) => n + f.hold_ms, 0)
+                        : 0) +
+                      (options.replay
+                        ? (c.end_ms - c.start_ms) / (options.replaySpeed || 0.5)
                         : 0),
                     false,
                   )}
                 </span>
                 <button
-                  title="Move earlier"
+                  title={t("Move earlier")}
                   disabled={!i}
                   onClick={() => move(i, -1)}
                 >
                   <ArrowUp size={14} />
                 </button>
                 <button
-                  title="Move later"
+                  title={t("Move later")}
                   disabled={i === clips.length - 1}
                   onClick={() => move(i, 1)}
                 >
                   <ArrowDown size={14} />
                 </button>
                 <button
-                  title="Remove from export"
+                  title={t("Remove from export")}
                   onClick={() => setClips(clips.filter((t) => t.id !== c.id))}
                 >
                   <X size={14} />
@@ -314,27 +397,27 @@ export function ExportDialog({
                     setOptions({ ...options, [key]: e.target.checked })
                   }
                 />
-                {label}
+                {t(label)}
               </label>
             ))}
             <label>
-              Resolution
+              {t("Resolution")}
               <Select
-                label="Resolution"
+                label={t("Resolution")}
                 value={String(options.height)}
                 onChange={(value) =>
                   setOptions({ ...options, height: Number(value) })
                 }
                 options={[
-                  { value: "1080", label: "1080p" },
-                  { value: "720", label: "720p" },
+                  { value: "1080", label: t("1080p") },
+                  { value: "720", label: t("720p") },
                 ]}
               />
             </label>
             <label>
-              Encoder
+              {t("Encoder")}
               <Select
-                label="Encoder"
+                label={t("Encoder")}
                 value={options.encoder}
                 onChange={(value) =>
                   setOptions({
@@ -343,12 +426,60 @@ export function ExportDialog({
                   })
                 }
                 options={[
-                  { value: "auto", label: "Automatic" },
-                  { value: "software", label: "Software (H.264)" },
+                  { value: "auto", label: t("Automatic") },
+                  { value: "software", label: t("Software (H.264)") },
                 ]}
               />
             </label>
           </div>
+          <details className="handball-tags">
+            <summary>{t("Presentation")}</summary>
+            <div className="export-settings">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={options.replay}
+                  onChange={(e) =>
+                    setOptions({ ...options, replay: e.target.checked })
+                  }
+                />
+                {t("Add a slow-motion replay after each Clip")}
+              </label>
+              <label>
+                {t("Replay speed")}
+                <Select
+                  label={t("Replay speed")}
+                  value={String(options.replaySpeed || 0.5)}
+                  disabled={!options.replay}
+                  onChange={(value) =>
+                    setOptions({
+                      ...options,
+                      replaySpeed: Number(value) as 0.25 | 0.5,
+                    })
+                  }
+                  options={[
+                    { value: "0.5", label: t("Half speed (0.5×)") },
+                    { value: "0.25", label: t("Quarter speed (0.25×)") },
+                  ]}
+                />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={options.handball}
+                  onChange={(e) =>
+                    setOptions({ ...options, handball: e.target.checked })
+                  }
+                />
+                {t("Include handball details on coaching cards")}
+              </label>
+            </div>
+            <p className="muted">
+              {t(
+                "Each original plays first with its saved freeze-frames. The replay follows without holds and with silent audio. Coaching cards show team, player, goalkeeper, phase and outcome when recorded.",
+              )}
+            </p>
+          </details>
         </fieldset>
         {running && (
           <div className="export-progress">
@@ -360,12 +491,14 @@ export function ExportDialog({
         )}
       </div>
       <div className="modal-footer">
-        <span className="muted grow">{clips.length} Clips · MP4 / H.264</span>
+        <span className="muted grow">
+          {clips.length} {t(" Clips · MP4 / H.264")}
+        </span>
         {running ? (
-          <button onClick={onCancel}>Cancel export</button>
+          <button onClick={onCancel}>{t("Cancel export")}</button>
         ) : (
           <>
-            <button onClick={onClose}>Cancel</button>
+            <button onClick={onClose}>{t("Cancel")}</button>
             <button
               className="primary"
               disabled={!clips.length}
@@ -373,7 +506,7 @@ export function ExportDialog({
                 onExport({ ...options, ids: clips.map((c) => c.id) })
               }
             >
-              Export video…
+              {t("Export video…")}
             </button>
           </>
         )}

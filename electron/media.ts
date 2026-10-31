@@ -7,12 +7,12 @@ import { fingerprint } from "./files";
 import type { SourceVideo } from "../src/domain";
 const requireNative = createRequire(__filename);
 export const ffmpeg: string = (
-  process.env.VIDEO_ANALYSE_FFMPEG || requireNative("ffmpeg-static")
+  process.env.TACTICUT_FFMPEG || requireNative("ffmpeg-static")
 )
   .replace("app.asar/", "app.asar.unpacked/")
   .replace("app.asar\\", "app.asar.unpacked\\");
 export const ffprobe: string = (
-  process.env.VIDEO_ANALYSE_FFPROBE || requireNative("@ffprobe-installer/ffprobe").path
+  process.env.TACTICUT_FFPROBE || requireNative("@ffprobe-installer/ffprobe").path
 )
   .replace("app.asar/", "app.asar.unpacked/")
   .replace("app.asar\\", "app.asar.unpacked\\");

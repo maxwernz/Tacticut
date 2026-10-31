@@ -8,8 +8,16 @@ const subscribe = (channel: string, fn: (value: any) => void) => {
 };
 const api: DesktopAPI = {
   platform: process.platform,
+  language: process.argv.includes("--tacticut-language=de") ? "de" : "en",
+  setLanguage: (language) => ipcRenderer.invoke("set-language", language),
   windowControl: (action) => ipcRenderer.send("window-control", action),
   open: () => ipcRenderer.invoke("open"),
+  projects: () => ipcRenderer.invoke("projects"),
+  browseProjects: () => ipcRenderer.invoke("browse-projects"),
+  openProject: (path) => ipcRenderer.invoke("open-project", path),
+  createCollection: (paths, title) =>
+    ipcRenderer.invoke("create-collection", paths, title),
+  forgetProject: (path) => ipcRenderer.invoke("forget-project", path),
   openPending: () => ipcRenderer.invoke("open-pending"),
   save: (data, as) => ipcRenderer.invoke("save", data, as),
   addVideos: () => ipcRenderer.invoke("add-videos"),
@@ -22,7 +30,11 @@ const api: DesktopAPI = {
   restore: () => ipcRenderer.invoke("restore"),
   template: (categories) => ipcRenderer.invoke("template", categories),
   export: (data, options) => ipcRenderer.invoke("export", data, options),
+  playerExports: (data, options) =>
+    ipcRenderer.invoke("player-exports", data, options),
   cancelExport: () => ipcRenderer.invoke("cancel-export"),
+  report: (data, ids, format) =>
+    ipcRenderer.invoke("report", data, ids, format),
   onProgress: (fn) => subscribe("progress", fn),
   onCommand: (fn) => subscribe("command", fn),
   setDirty: (dirty) => ipcRenderer.send("dirty", dirty),

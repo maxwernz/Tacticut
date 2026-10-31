@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./i18n";
 import { useEffect, useState } from "react";
 import type { UpdateState, UpdatesApi } from "./updates";
 
@@ -12,6 +13,7 @@ export function UpdateNotice({
   updates: UpdatesApi | undefined;
   onRestart: () => Promise<void>;
 }) {
+  useLanguage();
   const [state, setState] = useState<UpdateState>({ status: "none" });
   const [hidden, setHidden] = useState(false);
 
@@ -27,7 +29,7 @@ export function UpdateNotice({
   if (!updates || state.status === "none" || hidden) return null;
   const later = (
     <button type="button" onClick={() => setHidden(true)}>
-      Later
+      {t("Later")}
     </button>
   );
 
@@ -35,16 +37,18 @@ export function UpdateNotice({
     <div className="update-notice" role="status" aria-live="polite">
       {state.status === "available" && (
         <>
-          <strong>Tacticut {state.version} is available</strong>
+          <strong>
+            {t("Tacticut {version} is available", { version: state.version })}
+          </strong>
           {state.notes.trim() !== "" && (
             <div className="update-notes">{state.notes.trim()}</div>
           )}
           {!state.canInstall && (
             <div className="update-hint">
-              This copy can't update itself. Download the new version and{" "}
+              {t("This copy can't update itself. Download the new version and")}{" "}
               {navigator.userAgent.includes("Mac")
-                ? "move it to Applications"
-                : "install it"}
+                ? t("move it to Applications")
+                : t("install it")}
               .
             </div>
           )}
@@ -58,7 +62,7 @@ export function UpdateNotice({
                   if (await updates.install()) await onRestart();
                 }}
               >
-                Install and restart
+                {t("Install and restart")}
               </button>
             ) : (
               <button
@@ -66,7 +70,7 @@ export function UpdateNotice({
                 className="primary"
                 onClick={() => void updates.openPage()}
               >
-                Download
+                {t("Download")}
               </button>
             )}
           </div>
@@ -74,7 +78,9 @@ export function UpdateNotice({
       )}
       {state.status === "downloading" && (
         <>
-          <strong>Downloading Tacticut {state.version}…</strong>
+          <strong>
+            {t("Downloading Tacticut {version}…", { version: state.version })}
+          </strong>
           <div className="update-bar">
             <span style={{ width: `${Math.round(state.progress * 100)}%` }} />
           </div>
@@ -82,8 +88,12 @@ export function UpdateNotice({
       )}
       {state.status === "ready" && (
         <>
-          <strong>Tacticut {state.version} is ready</strong>
-          <div className="update-notes">It installs when you quit Tacticut.</div>
+          <strong>
+            {t("Tacticut {version} is ready", { version: state.version })}
+          </strong>
+          <div className="update-notes">
+            {t("It installs when you quit Tacticut.")}
+          </div>
           <div className="update-actions">
             {later}
             <button
@@ -91,25 +101,29 @@ export function UpdateNotice({
               className="primary"
               onClick={() => void onRestart()}
             >
-              Restart now
+              {t("Restart now")}
             </button>
           </div>
         </>
       )}
       {state.status === "failed" && (
         <>
-          <strong>Tacticut {state.version} could not be installed</strong>
+          <strong>
+            {t("Tacticut {version} could not be installed", {
+              version: state.version,
+            })}
+          </strong>
           <div className="update-notes">{state.message}</div>
           <div className="update-actions">
             <button type="button" onClick={() => setHidden(true)}>
-              Close
+              {t("Close")}
             </button>
             <button
               type="button"
               className="primary"
               onClick={() => void updates.openPage()}
             >
-              Download instead
+              {t("Download instead")}
             </button>
           </div>
         </>

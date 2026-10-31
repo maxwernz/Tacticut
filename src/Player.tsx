@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./i18n";
 import {
   forwardRef,
   useEffect,
@@ -25,15 +26,16 @@ import {
   Square,
 } from "lucide-react";
 import type { Category, Clip, SourceVideo } from "./domain";
-import { timecode } from "./domain";
+import { categoryShortcut, categoryLabel, timecode } from "./domain";
 import type { Media } from "./api";
 import { Select } from "./Select";
+import { ProjectWelcome } from "./ProjectWelcome";
 import { AnnotationCanvas } from "./AnnotationCanvas";
 import {
   useSequencePlayback,
   type SequenceRequest,
 } from "./useSequencePlayback";
-const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
+const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8];
 export type PlayerHandle = {
   capturePosition(): { position: number; duration: number } | null;
   preview(start: number, end: number, loop: boolean): void;
@@ -43,10 +45,13 @@ export type PlayerHandle = {
   toggle(): void;
   pause(): void;
   step(delta: number): void;
+  /** Keyboard navigation uses the selected playback speed; frame buttons stay precise. */
+  scrub(direction: number, jump?: boolean): void;
   jump(delta: number): void;
   changeSpeed(direction: number): void;
 };
 type Props = {
+  jumpSeconds?: number;
   sequence: SequenceRequest | null;
   onSequenceEnd(token: number): void;
   onSequenceCancel(): void;
@@ -63,14 +68,19 @@ type Props = {
   onReview(clip: Clip): void;
   onMark(): void;
   captureDisabled: boolean;
+  onTagPlay?(): void;
   onQuickTag(categoryId: string): void;
   onCaptureSettings(): void;
   onAdd(): void;
+  onOpen?(): void;
+  onTour?(): void;
+  tourSeen?: boolean;
   onCancelPending(): void;
   onRelink(): void;
   onError(message: string): void;
 };
 export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
+  useLanguage();
   const video = useRef<HTMLVideoElement>(null),
     stage = useRef<HTMLDivElement>(null),
     timeline = useRef<HTMLDivElement>(null),
@@ -92,6 +102,9 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
     scrubTarget = useRef(0);
   const duration = media?.duration_ms || p.source?.duration_ms || 0;
   const loadedSource = useRef("");
+  const relativeTarget = useRef<{ observed: number; target: number } | null>(
+    null,
+  );
   const previewRange = useRef<{
     start: number;
     end: number;
@@ -101,9 +114,29 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
     if (p.sequence) p.onSequenceCancel();
     previewRange.current = null;
     seekTarget.current = Math.max(0, Math.min(duration, ms));
-    if (video.current?.readyState)
-      video.current.currentTime = seekTarget.current / 1000;
+    const v = video.current;
+    relativeTarget.current = v?.readyState
+      ? { observed: v.currentTime * 1000, target: seekTarget.current }
+      : null;
+    if (v?.readyState) v.currentTime = seekTarget.current / 1000;
   };
+  const move = (delta: number, pause = false) => {
+    const v = video.current;
+    if (!v || !media || loading || failure || !Number.isFinite(delta)) return;
+    if (pause) v.pause();
+    const observed = v.currentTime * 1000;
+    const previous = relativeTarget.current;
+    // A decoder can still report the old time while repeated keys are seeking.
+    // Accumulate requested positions so fast navigation never loses key presses.
+    const position =
+      previous && (v.seeking || observed === previous.observed)
+        ? previous.target
+        : observed;
+    seek(position + delta);
+    relativeTarget.current = { observed, target: seekTarget.current };
+  };
+  const step = (direction: number) =>
+    move((direction * 1000) / (media?.fps || 25), true);
   const toggle = () => {
     if (sequencePlayback.toggleHold()) return;
     const v = video.current;
@@ -152,18 +185,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
     seek,
     toggle,
     pause: () => video.current?.pause(),
-    step: (delta) => {
-      video.current?.pause();
-      seek(
-        (video.current?.currentTime || 0) * 1000 +
-          (delta * 1000) / (media?.fps || 25),
-      );
-    },
-    jump: (delta) => seek((video.current?.currentTime || 0) * 1000 + delta),
+    step,
+    scrub: (direction, jump = false) =>
+      move(
+        direction *
+          rate *
+          (jump ? (p.jumpSeconds || 5) * 1000 : 1000 / (media?.fps || 25)),
+        true,
+      ),
+    jump: (delta) => move(delta),
   }));
   useEffect(() => {
     setProxy(false);
     previewRange.current = null;
+    relativeTarget.current = null;
   }, [p.source?.id, p.source?.location]);
   useEffect(() => {
     let cancelled = false;
@@ -320,43 +355,44 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             <div className="freeze-playback-label">
               <span>
                 {sequencePlayback.holdPaused
-                  ? "Coaching freeze · paused"
-                  : "Coaching freeze"}
+                  ? t("Coaching freeze · paused")
+                  : t("Coaching freeze")}
               </span>
-              <button onClick={sequencePlayback.skipHold}>Continue now</button>
+              <button onClick={sequencePlayback.skipHold}>
+                {t("Continue now")}
+              </button>
             </div>
           </>
         )}
         {!p.source && (
-          <div className="empty-stage">
-            <Film size={42} strokeWidth={1} />
-            <h1>Add a Source video</h1>
-            <p>Add a Source video to start your Analysis.</p>
-            <button className="primary" onClick={p.onAdd}>
-              <Plus size={15} /> Add Source video
-            </button>
-            <small>or drop videos anywhere in the window</small>
-          </div>
+          <ProjectWelcome
+            onAdd={p.onAdd}
+            onOpen={p.onOpen}
+            onTour={p.onTour}
+            tourSeen={p.tourSeen}
+          />
         )}
         {loading && (
           <div className="stage-message">
             <span className="spinner" />
             <p>
               {proxy
-                ? "Preparing compatible playback…"
-                : "Opening Source video…"}
+                ? t("Preparing compatible playback…")
+                : t("Opening Source video…")}
             </p>
             {proxy && (
-              <small>This first conversion can take a few minutes.</small>
+              <small>
+                {t("This first conversion can take a few minutes.")}
+              </small>
             )}
           </div>
         )}
         {failure && (
           <div className="stage-message error-stage">
             <Film size={32} />
-            <p>{failure}</p>
+            <p>{t(failure)}</p>
             <div className="row">
-              <button onClick={p.onRelink}>Relink video</button>
+              <button onClick={p.onRelink}>{t("Relink video")}</button>
               {!proxy && (
                 <button
                   onClick={() => {
@@ -364,7 +400,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
                     setProxy(true);
                   }}
                 >
-                  Create playback copy
+                  {t("Create playback copy")}
                 </button>
               )}
             </div>
@@ -373,13 +409,14 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
         {p.source && !loading && !failure && (
           <div className="source-caption">
             {p.source.display_name}
-            {proxy && <span> · playback copy</span>}
+            {proxy && <span>{t(" · playback copy")}</span>}
           </div>
         )}
         {p.pending != null && (
           <button className="pending-badge" onClick={p.onCancelPending}>
-            <span className="record-dot" /> Clip starts at {timecode(p.pending)}{" "}
-            <span>· Esc to cancel</span>
+            <span className="record-dot" />
+            {t(" Clip starts at ")}
+            {timecode(p.pending)} <span>{t("· Esc to cancel")}</span>
           </button>
         )}
       </div>
@@ -388,20 +425,20 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
           {activeClip
             ? activeClip.name
             : p.source
-              ? "Source timeline"
-              : "No Source video"}
+              ? t("Source timeline")
+              : t("No Source video")}
         </span>
         <span>
           {activeClip
             ? `${timecode(activeClip.start_ms)} — ${timecode(activeClip.end_ms)}`
-            : `${p.clips.length} Clips`}
+            : t("{count} Clips", { count: p.clips.length })}
         </span>
       </div>
       <div
         ref={timeline}
         className="timeline"
         role="slider"
-        aria-label="Video timeline"
+        aria-label={t("Video timeline")}
         aria-valuemin={0}
         aria-valuemax={duration}
         tabIndex={0}
@@ -458,38 +495,30 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
         </div>
         <div className="playhead" ref={head} />
       </div>
-      <div className="transport">
+      <div className="transport" data-tour="transport">
         <div className="time-display">
           <strong ref={clock}>{timecode(0)}</strong>
           <span>/ {timecode(duration, false)}</span>
         </div>
         <div className="play-controls">
           <button
-            title="Back 5 seconds (Shift+Left)"
+            title={t("Back {seconds} seconds", { seconds: p.jumpSeconds || 5 })}
             disabled={!media}
-            onClick={() =>
-              seek((video.current?.currentTime || 0) * 1000 - 5000)
-            }
+            onClick={() => move(-(p.jumpSeconds || 5) * 1000)}
           >
             <RotateCcw size={17} />
-            <small>5</small>
+            <small>{p.jumpSeconds || 5}</small>
           </button>
           <button
-            title="Previous frame (Left)"
+            title={t("Previous frame")}
             disabled={!media}
-            onClick={() => {
-              video.current?.pause();
-              seek(
-                (video.current?.currentTime || 0) * 1000 -
-                  1000 / (media?.fps || 25),
-              );
-            }}
+            onClick={() => step(-1)}
           >
             <SkipBack size={17} />
           </button>
           <button
             className="play-button"
-            title="Play / pause (Space)"
+            title={t("Play / pause (Space)")}
             disabled={!media}
             onClick={toggle}
           >
@@ -501,46 +530,40 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             )}
           </button>
           <button
-            title="Next frame (Right)"
+            title={t("Next frame")}
             disabled={!media}
-            onClick={() => {
-              video.current?.pause();
-              seek(
-                (video.current?.currentTime || 0) * 1000 +
-                  1000 / (media?.fps || 25),
-              );
-            }}
+            onClick={() => step(1)}
           >
             <SkipForward size={17} />
           </button>
           <button
-            title="Forward 5 seconds (Shift+Right)"
+            title={t("Forward {seconds} seconds", {
+              seconds: p.jumpSeconds || 5,
+            })}
             disabled={!media}
-            onClick={() =>
-              seek((video.current?.currentTime || 0) * 1000 + 5000)
-            }
+            onClick={() => move((p.jumpSeconds || 5) * 1000)}
           >
             <RotateCw size={17} />
-            <small>5</small>
+            <small>{p.jumpSeconds || 5}</small>
           </button>
         </div>
-        <div className="play-settings">
+        <div className="play-settings" data-tour="capture">
           {p.sequence && (
-            <button title="Stop Clip review" onClick={p.onSequenceCancel}>
+            <button title={t("Stop Clip review")} onClick={p.onSequenceCancel}>
               <Square size={14} />
             </button>
           )}
           {activeClip && (
             <>
               <button
-                title="Review Clip with freeze-frames"
+                title={t("Review Clip with freeze-frames")}
                 disabled={p.captureDisabled || !media}
                 onClick={() => p.onReview(activeClip)}
               >
                 <CircleArrowRight size={16} />
               </button>
               <button
-                title="Annotate selected Clip"
+                title={t("Annotate selected Clip")}
                 disabled={
                   p.captureDisabled ||
                   !media ||
@@ -564,7 +587,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
           )}
           {activeClip && (
             <button
-              title="Edit selected Clip"
+              title={t("Edit selected Clip")}
               disabled={p.captureDisabled}
               onClick={() => p.onEdit(activeClip)}
             >
@@ -575,21 +598,35 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             className={
               p.pending === null ? "capture-button" : "capture-button recording"
             }
-            title={
-              p.pending === null ? "Mark Clip start (M)" : "Mark Clip end (M)"
-            }
-            aria-label={
-              p.pending === null ? "Mark Clip start" : "Mark Clip end"
-            }
+            title={t(
+              p.pending === null ? "Mark Clip start (M)" : "Mark Clip end (M)",
+            )}
+            aria-label={t(
+              p.pending === null ? "Mark Clip start" : "Mark Clip end",
+            )}
             disabled={!media || loading || !!failure || p.captureDisabled}
             onClick={p.onMark}
           >
             <Scissors size={16} />
           </button>
+          {p.onTagPlay && (
+            <button
+              className="tag-play-button"
+              data-tour="tag-play"
+              title={t("Tag play (T)")}
+              disabled={
+                !media || loading || p.captureDisabled || p.pending !== null
+              }
+              onClick={p.onTagPlay}
+            >
+              <Plus size={16} />
+              {t("Tag play")}
+            </button>
+          )}
           <Select
-            label="Quick tag"
+            label={t("Quick tag")}
             value=""
-            display="Tag"
+            display="Quick capture"
             disabled={
               !media ||
               loading ||
@@ -599,16 +636,19 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             }
             options={p.categories.map((category, index) => ({
               value: category.id,
-              label: `${index < 9 ? `${index + 1} · ` : ""}${category.name}`,
+              label: `${categoryShortcut(p.categories, category) ? `${categoryShortcut(p.categories, category)} · ` : ""}${categoryLabel(category)}`,
               color: category.color,
             }))}
             onChange={p.onQuickTag}
           />
-          <button title="Quick capture settings" onClick={p.onCaptureSettings}>
+          <button
+            title={t("Quick capture settings")}
+            onClick={p.onCaptureSettings}
+          >
             <Settings2 size={15} />
           </button>
           <Select
-            label="Playback speed"
+            label={t("Playback speed")}
             value={String(rate)}
             onChange={(value) => setRate(Number(value))}
             options={PLAYBACK_RATES.map((r) => ({
@@ -616,12 +656,12 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
               label: `${r}×`,
             }))}
           />
-          <button title="Mute" onClick={() => setMuted(!muted)}>
+          <button title={t("Mute")} onClick={() => setMuted(!muted)}>
             {muted || !volume ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>
           <input
             className="volume"
-            aria-label="Volume"
+            aria-label={t("Volume")}
             type="range"
             min="0"
             max="1"
@@ -630,7 +670,7 @@ export const Player = forwardRef<PlayerHandle, Props>(function Player(p, ref) {
             onChange={(e) => setVolume(Number(e.target.value))}
           />
           <button
-            title="Fullscreen video"
+            title={t("Fullscreen video")}
             disabled={!media}
             onClick={() => void stage.current?.requestFullscreen()}
           >

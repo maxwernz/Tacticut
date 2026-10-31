@@ -1,3 +1,4 @@
+import { tFor } from "../src/i18n";
 import {
   mkdtemp,
   writeFile,
@@ -11,13 +12,20 @@ import { join, dirname, basename, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { analysisSchema, type FreezeFrame } from "../src/domain";
+import {
+  analysisSchema,
+  clipCategoryIds,
+  clipCategoryLabels,
+  type FreezeFrame,
+} from "../src/domain";
 import { clipPresentation } from "../src/annotations";
+import { fieldOptions } from "../src/handball";
 import { renderFreezeFrame } from "./annotations";
 import type { Loaded, ExportOptions, Progress } from "../src/api";
 import { resolveSource } from "./files";
 import { ffmpeg, run, probe } from "./media";
 export const exportSchema = z.object({
+  language: z.enum(["en", "de"]).optional(),
   ids: z.array(z.string()).min(1),
   title: z.boolean(),
   categories: z.boolean(),
@@ -27,6 +35,9 @@ export const exportSchema = z.object({
   encoder: z.enum(["auto", "software"]),
   height: z.union([z.literal(720), z.literal(1080)]),
   annotations: z.boolean().default(true),
+  replay: z.boolean().default(false),
+  replaySpeed: z.union([z.literal(0.25), z.literal(0.5)]).default(0.5),
+  handball: z.boolean().default(false),
 });
 export async function renderExport(
   data: Loaded,
@@ -38,6 +49,8 @@ export async function renderExport(
 ) {
   const a = analysisSchema.parse(data.analysis),
     options = exportSchema.parse(rawOptions);
+  const t = (source: string, params?: Record<string, string | number>) =>
+    tFor(options.language || "en", source, params);
   if (new Set(options.ids).size !== options.ids.length)
     throw new Error("Export list contains duplicates");
   const clips = options.ids.map((id) => {
@@ -86,22 +99,57 @@ export async function renderExport(
     number?: string;
     audio?: boolean;
     freeze?: FreezeFrame;
+    speed?: number;
+    inputDuration?: number;
+    replayLabel?: string;
   };
   const segments: Segment[] = [];
   if (options.title)
-    segments.push({ duration: 1.5, text: a.title || "Analysis" });
-  let lastCategory: string | null | undefined;
+    segments.push({ duration: 1.5, text: a.title || t("Analysis") });
+  let lastCategory: string | undefined;
   clips.forEach((clip, i) => {
-    if (options.categories && clip.category_id !== lastCategory)
+    const categoryKey = JSON.stringify(clipCategoryIds(clip));
+    if (options.categories && categoryKey !== lastCategory)
       segments.push({
         duration: 1.5,
         text:
-          a.categories.find((c) => c.id === clip.category_id)?.name ||
-          "Ohne Kategorie",
+          clipCategoryLabels(clip, a.categories).join("\n") ||
+          t("Uncategorized"),
       });
-    lastCategory = clip.category_id;
-    if (options.notes && clip.notes.trim())
-      segments.push({ duration: 2, text: clip.notes });
+    lastCategory = categoryKey;
+    const details =
+      options.handball && clip.handball
+        ? [
+            clip.handball.team &&
+              t("Team: {name}", { name: clip.handball.team }),
+            clip.handball.player &&
+              t("Player: {name}", { name: clip.handball.player }),
+            clip.handball.goalkeeper &&
+              t("Goalkeeper: {name}", { name: clip.handball.goalkeeper }),
+            clip.handball.phase &&
+              t("Phase: {name}", {
+                name: t(
+                  fieldOptions.phase.find(
+                    (o) => o.value === clip.handball?.phase,
+                  )?.label || "",
+                ),
+              }),
+            clip.handball.outcome &&
+              t("Outcome: {name}", {
+                name: t(
+                  fieldOptions.outcome.find(
+                    (o) => o.value === clip.handball?.outcome,
+                  )?.label || "",
+                ),
+              }),
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : "";
+    const card = [options.notes ? clip.notes.trim() : "", details]
+      .filter(Boolean)
+      .join("\n\n");
+    if (card) segments.push({ duration: 2, text: card });
     for (const part of clipPresentation(
       clip,
       options.annotations ? a.freeze_frames : [],
@@ -114,6 +162,19 @@ export async function renderExport(
         audio: !part.freeze && metadata.get(clip.source_video_id)!.audio,
         freeze: part.freeze,
       });
+    if (options.replay) {
+      const inputDuration = (clip.end_ms - clip.start_ms) / 1000;
+      segments.push({
+        path: paths.get(clip.source_video_id),
+        start: clip.start_ms / 1000,
+        inputDuration,
+        duration: inputDuration / options.replaySpeed,
+        speed: options.replaySpeed,
+        number: options.numbers ? String(i + 1) : undefined,
+        audio: false,
+        replayLabel: t("Replay · {speed}×", { speed: options.replaySpeed }),
+      });
+    }
   });
   const total = segments.reduce((n, s) => n + s.duration, 0);
   let done = 0;
@@ -127,7 +188,10 @@ export async function renderExport(
       if (s.freeze) {
         progress({
           percent: Math.min(98, (done / total) * 98),
-          message: `Drawing freeze-frame ${i + 1} of ${segments.length}`,
+          message: t("Drawing freeze-frame {index} of {count}", {
+            index: i + 1,
+            count: segments.length,
+          }),
         });
         const still = await renderFreezeFrame(
           s.path!,
@@ -137,13 +201,19 @@ export async function renderExport(
           w,
           h,
           signal,
+          font,
         );
         args.push("-loop", "1", "-framerate", "30", "-i", still);
-      } else if (s.path) args.push("-ss", String(s.start), "-i", s.path);
-      else args.push("-f", "lavfi", "-i", `color=c=0x353333:s=${w}x${h}:r=30`);
+      } else if (s.path) {
+        args.push("-ss", String(s.start));
+        if (s.inputDuration != null) args.push("-t", String(s.inputDuration));
+        args.push("-i", s.path);
+      } else
+        args.push("-f", "lavfi", "-i", `color=c=0x353333:s=${w}x${h}:r=30`);
       if (options.audio && (!s.path || !s.audio))
         args.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
       const filters = [
+        ...(s.speed ? [`setpts=(PTS-STARTPTS)/${s.speed}`] : []),
         `scale=${w}:${h}:force_original_aspect_ratio=decrease:force_divisible_by=2`,
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`,
         "setsar=1",
@@ -154,6 +224,12 @@ export async function renderExport(
         await writeFile(join(work, `text-${i}.txt`), text);
         filters.push(
           `drawtext=fontfile=font.ttf:textfile=text-${i}.txt:expansion=none:fontcolor=white:fontsize=${s.number ? Math.round(h * 0.065) : Math.round(h * 0.047)}:x=${s.number ? 30 : "(w-text_w)/2"}:y=${s.number ? 30 : "(h-text_h)/2"}:line_spacing=12`,
+        );
+      }
+      if (s.replayLabel) {
+        await writeFile(join(work, `replay-${i}.txt`), s.replayLabel);
+        filters.push(
+          `drawtext=fontfile=font.ttf:textfile=replay-${i}.txt:expansion=none:fontcolor=white:fontsize=${Math.round(h * 0.035)}:x=w-text_w-30:y=h-text_h-30:box=1:boxcolor=black@0.55:boxborderw=8`,
         );
       }
       args.push(
@@ -205,7 +281,10 @@ export async function renderExport(
                   98,
                   ((done + Math.min(seconds, s.duration)) / total) * 98,
                 ),
-                message: `Rendering ${i + 1} of ${segments.length}`,
+                message: t("Rendering {index} of {count}", {
+                  index: i + 1,
+                  count: segments.length,
+                }),
               }),
           },
         );
@@ -222,7 +301,7 @@ export async function renderExport(
       join(work, "list.txt"),
       segments.map((_, i) => `file 'segment-${i}.mp4'`).join("\n"),
     );
-    progress({ percent: 99, message: "Finalizing presentation video" });
+    progress({ percent: 99, message: t("Finalizing presentation video") });
     await run(
       ffmpeg,
       [
@@ -245,7 +324,7 @@ export async function renderExport(
     );
     if (signal.aborted) throw new Error("Export cancelled");
     await rename(partial, output);
-    progress({ percent: 100, message: "Export complete" });
+    progress({ percent: 100, message: t("Export complete") });
   } finally {
     await rm(work, { recursive: true, force: true });
     await unlink(partial).catch(() => {});

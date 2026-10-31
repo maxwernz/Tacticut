@@ -12,9 +12,9 @@ import { dirname, join, resolve } from "node:path";
 import { videoClock } from "./timeline.mts";
 
 const require = createRequire(import.meta.url);
-export const ffmpeg: string = process.env.VIDEO_ANALYSE_FFMPEG || require("ffmpeg-static");
+export const ffmpeg: string = process.env.TACTICUT_FFMPEG || require("ffmpeg-static");
 export const ffprobe: string =
-  process.env.VIDEO_ANALYSE_FFPROBE || require("@ffprobe-installer/ffprobe").path;
+  process.env.TACTICUT_FFPROBE || require("@ffprobe-installer/ffprobe").path;
 const font = resolve(import.meta.dirname, "../public/fonts/NotoSans.ttf");
 
 export function run(binary: string, args: string[], signal?: AbortSignal): Promise<string> {

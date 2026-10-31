@@ -155,3 +155,63 @@ it("maps drawings to the actual picture, excluding letterbox bars, and generates
     annotationSvg([{ ...shape, color: '" onload="bad' }], 1280, 720),
   ).toThrow();
 });
+
+it("moves and resizes shapes without distorting at edges, and safely exports bounded text and lines", async () => {
+  const { moveDrawing, resizeDrawing, drawingPath } = await import(
+    "../src/annotations"
+  );
+  const { shape, a } = annotationFixture();
+  const moved = moveDrawing(shape, 1, 1);
+  expect(moved.x2).toBe(1);
+  expect(moved.x2 - moved.x1).toBeCloseTo(shape.x2 - shape.x1);
+  expect(moved.y2).toBe(1);
+  expect(drawingPath({ ...shape, kind: "line" }, 640, 360)).toBe(
+    "M 128 180 L 512 180",
+  );
+  const text: Drawing = {
+    ...shape,
+    kind: "text",
+    text: '<script>alert("test")</script> & coach',
+    font_size: 0.045,
+    y1: 0.2,
+    y2: 0.6,
+  };
+  const svg = annotationSvg([text], 640, 360);
+  expect(svg).toContain("&lt;script&gt;");
+  expect(svg).not.toContain("<script>");
+  expect(resizeDrawing(text, "end", -0.2, -0.2).x2).toBeGreaterThan(text.x1);
+  a.freeze_frames[0].shapes = [text];
+  expect(JSON.parse(encode(a)).schema_version).toBe(6);
+  expect(decode(encode(a)).freeze_frames[0].shapes[0]).toEqual(text);
+});
+it("renders annotation text with the bundled font for native video exports", async () => {
+  const { Resvg } = await import("@resvg/resvg-js");
+  const { resolve } = await import("node:path");
+  const { shape } = annotationFixture();
+  const svg = annotationSvg(
+    [
+      {
+        ...shape,
+        kind: "text",
+        text: "Attack the space",
+        font_size: 0.06,
+        x1: 0.1,
+        y1: 0.1,
+        x2: 0.9,
+        y2: 0.5,
+      },
+    ],
+    640,
+    360,
+  );
+  const png = new Resvg(svg, {
+    font: {
+      loadSystemFonts: false,
+      fontFiles: [resolve("public/fonts/NotoSans.ttf")],
+    },
+  }).render();
+  const pixels = png.pixels;
+  let opaque = 0;
+  for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) opaque++;
+  expect(opaque).toBeGreaterThan(250);
+});

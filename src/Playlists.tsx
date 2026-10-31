@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import {
   playlistClips,
+  clipCategoryLabels,
   timecode,
   type Analysis,
   type Clip,
@@ -44,6 +46,7 @@ export function Playlists({
   playingClipId: string | null;
   canPlay: boolean;
 }) {
+  useLanguage();
   const playlist =
     analysis.playlists.find((p) => p.id === activeId) || analysis.playlists[0];
   const [name, setName] = useState(playlist?.name || "");
@@ -89,11 +92,15 @@ export function Playlists({
   };
   const create = () => {
     let index = analysis.playlists.length + 1;
-    while (analysis.playlists.some((p) => p.name === `Playlist ${index}`))
+    while (
+      analysis.playlists.some(
+        (p) => p.name === t("Playlist {number}", { number: index }),
+      )
+    )
       index++;
     const p = {
       id: crypto.randomUUID(),
-      name: `Playlist ${index}`,
+      name: t("Playlist {number}", { number: index }),
       clip_ids: [],
     };
     change((a) => a.playlists.push(p));
@@ -102,7 +109,7 @@ export function Playlists({
   const candidates = analysis.clips.filter(
     (c) =>
       !playlist?.clip_ids.includes(c.id) &&
-      `${c.name} ${c.notes} ${analysis.categories.find((t) => t.id === c.category_id)?.name || ""}`
+      `${c.name} ${c.notes} ${clipCategoryLabels(c, analysis.categories).join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
@@ -110,7 +117,7 @@ export function Playlists({
     <div className="playlist-panel">
       <div className="playlist-picker">
         <Select
-          label="Coaching playlist"
+          label={t("Coaching playlist")}
           value={playlist?.id || ""}
           options={analysis.playlists.map((p) => ({
             value: p.id,
@@ -122,21 +129,21 @@ export function Playlists({
             onActive(id);
           }}
         />
-        <button title="New playlist" onClick={create}>
+        <button title={t("New playlist")} onClick={create}>
           <Plus size={16} />
         </button>
       </div>
       {!playlist ? (
         <div className="sidebar-empty">
-          <p>No coaching playlists yet</p>
-          <small>Arrange existing Clips into a team review.</small>
-          <button onClick={create}>Create playlist</button>
+          <p>{t("No coaching playlists yet")}</p>
+          <small>{t("Arrange existing Clips into a team review.")}</small>
+          <button onClick={create}>{t("Create playlist")}</button>
         </div>
       ) : (
         <>
           <div className="playlist-heading">
             <input
-              aria-label="Playlist name"
+              aria-label={t("Playlist name")}
               value={name}
               maxLength={120}
               onChange={(e) => setName(e.target.value)}
@@ -154,7 +161,7 @@ export function Playlists({
               }}
             />
             <span className="muted">
-              {clips.length} Clips ·{" "}
+              {clips.length} {t(" Clips ·")}{" "}
               {timecode(
                 clips.reduce((sum, c) => sum + presentationDuration(c), 0),
                 false,
@@ -164,35 +171,38 @@ export function Playlists({
               {playingId === playlist.id ? (
                 <button onClick={onStop}>
                   <Square size={13} />
-                  Stop playlist
+                  {t("Stop playlist")}
                 </button>
               ) : (
                 <button
                   disabled={!clips.length || !canPlay}
                   title={
                     canPlay
-                      ? "Play Clips in playlist order"
-                      : "Finish or cancel the current Clip capture first"
+                      ? t("Play Clips in playlist order")
+                      : t("Finish or cancel the current Clip capture first")
                   }
                   onClick={() => onPlay(playlist)}
                 >
                   <Play size={14} />
-                  Play playlist
+                  {t("Play playlist")}
                 </button>
               )}
               <button
-                title="Export playlist"
+                title={t("Export playlist")}
                 disabled={!clips.length}
                 onClick={() => onExport(clips)}
               >
                 <Download size={15} />
               </button>
-              <button title="Delete playlist" onClick={() => setDeleting(true)}>
+              <button
+                title={t("Delete playlist")}
+                onClick={() => setDeleting(true)}
+              >
                 <Trash2 size={14} />
               </button>
             </div>
           </div>
-          <ol className="playlist-clips" aria-label="Playlist Clips">
+          <ol className="playlist-clips" aria-label={t("Playlist Clips")}>
             {clips.map((clip, index) => (
               <li
                 key={clip.id}
@@ -205,8 +215,8 @@ export function Playlists({
                 <button
                   className="playlist-clip-main"
                   disabled={!canPlay}
-                  title={`Play from ${clip.name}`}
-                  aria-label={`Play from ${clip.name}`}
+                  title={t("Play from {name}", { name: clip.name })}
+                  aria-label={t("Play from {name}", { name: clip.name })}
                   onClick={() => onPlay(playlist, index)}
                 >
                   <span className="mono muted">{index + 1}</span>
@@ -233,7 +243,7 @@ export function Playlists({
                 </button>
                 <div className="playlist-row-actions">
                   <button
-                    title={`Move ${clip.name} earlier`}
+                    title={t("Move {name} earlier", { name: clip.name })}
                     disabled={index === 0}
                     onClick={() =>
                       update((p) => {
@@ -247,7 +257,7 @@ export function Playlists({
                     <ArrowUp size={13} />
                   </button>
                   <button
-                    title={`Move ${clip.name} later`}
+                    title={t("Move {name} later", { name: clip.name })}
                     disabled={index === clips.length - 1}
                     onClick={() =>
                       update((p) => {
@@ -261,7 +271,9 @@ export function Playlists({
                     <ArrowDown size={13} />
                   </button>
                   <button
-                    title={`Remove ${clip.name} from playlist`}
+                    title={t("Remove {name} from playlist", {
+                      name: clip.name,
+                    })}
                     onClick={() =>
                       update((p) => {
                         p.clip_ids = p.clip_ids.filter((id) => id !== clip.id);
@@ -275,7 +287,7 @@ export function Playlists({
             ))}
             {!clips.length && (
               <li className="sidebar-empty">
-                Add Clips, then arrange them in coaching order.
+                {t("Add Clips, then arrange them in coaching order.")}
               </li>
             )}
           </ol>
@@ -291,21 +303,25 @@ export function Playlists({
               }}
             >
               <Plus size={14} />
-              Add Clips
+              {t("Add Clips")}
             </button>
           </div>
           <p className="playlist-format-note">
-            Playlists require TS format v2; annotations require v3. Older Python
-            versions cannot open these files.
+            {t(
+              "Playlists require TS format v2; annotations require v3. Older Python versions cannot open these files.",
+            )}
           </p>
         </>
       )}
       {adding && playlist && (
-        <Modal title="Add Clips to playlist" onClose={() => setAdding(false)}>
+        <Modal
+          title={t("Add Clips to playlist")}
+          onClose={() => setAdding(false)}
+        >
           <div className="modal-body">
             <input
-              aria-label="Search Clips to add"
-              placeholder="Search Clips, Categories and notes…"
+              aria-label={t("Search Clips to add")}
+              placeholder={t("Search Clips, Categories and notes…")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -314,7 +330,7 @@ export function Playlists({
                 <label key={clip.id} className="checkbox-label">
                   <input
                     type="checkbox"
-                    aria-label={`Add ${clip.name}`}
+                    aria-label={t("Add {name}", { name: clip.name })}
                     checked={chosen.includes(clip.id)}
                     onChange={(e) =>
                       setChosen((ids) =>
@@ -338,12 +354,12 @@ export function Playlists({
                 </label>
               ))}
               {!candidates.length && (
-                <p className="muted">No matching Clips to add.</p>
+                <p className="muted">{t("No matching Clips to add.")}</p>
               )}
             </div>
           </div>
           <div className="modal-footer">
-            <button onClick={() => setAdding(false)}>Cancel</button>
+            <button onClick={() => setAdding(false)}>{t("Cancel")}</button>
             <button
               className="primary"
               disabled={!chosen.length}
@@ -354,18 +370,20 @@ export function Playlists({
                 setAdding(false);
               }}
             >
-              Add {chosen.length || ""} Clips
+              {t("Add {count} Clips", { count: chosen.length || "" })}
             </button>
           </div>
         </Modal>
       )}
       {deleting && playlist && (
-        <Modal title="Delete playlist?" onClose={() => setDeleting(false)}>
+        <Modal title={t("Delete playlist?")} onClose={() => setDeleting(false)}>
           <div className="modal-body">
-            Delete “{playlist.name}”? All original Clips stay in the Analysis.
+            {t("Delete “{name}”? All original Clips stay in the Analysis.", {
+              name: playlist.name,
+            })}
           </div>
           <div className="modal-footer">
-            <button onClick={() => setDeleting(false)}>Cancel</button>
+            <button onClick={() => setDeleting(false)}>{t("Cancel")}</button>
             <button
               onClick={() => {
                 change((a) => {
@@ -374,7 +392,7 @@ export function Playlists({
                 setDeleting(false);
               }}
             >
-              Delete playlist
+              {t("Delete playlist")}
             </button>
           </div>
         </Modal>

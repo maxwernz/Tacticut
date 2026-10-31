@@ -34,7 +34,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
   try {
     app = await electron.launch({
       args: [resolve(".")],
-      env: { ...process.env, VIDEO_ANALYSE_USER_DATA: join(dir, "user-data") },
+      env: { ...process.env, TACTICUT_USER_DATA: join(dir, "user-data") },
     });
     const page = await app.firstWindow();
     const errors: string[] = [];
@@ -76,7 +76,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
     await page.getByTitle("Edit Fast break").click();
     await page.getByLabel("NAME", { exact: true }).fill("Discard this edit");
     await page
-      .locator(".clip-editor")
+      .locator(".tagging-workspace")
       .getByRole("button", { name: "Cancel", exact: true })
       .click();
     await expect(page.locator(".clip-info strong")).toHaveText("Fast break");
@@ -156,7 +156,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
     app = undefined;
     app = await electron.launch({
       args: [resolve(".")],
-      env: { ...process.env, VIDEO_ANALYSE_USER_DATA: join(dir, "user-data") },
+      env: { ...process.env, TACTICUT_USER_DATA: join(dir, "user-data") },
     });
     const recovered = await app.firstWindow();
     await recovered

@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   analysisSchema,
   captureRange,
+  clipCategoryIds,
+  clipCategoryLabels,
+  withClipCategories,
   decode,
   encode,
   exportOrder,
@@ -60,7 +63,7 @@ describe("Python Analysis compatibility and invariants", () => {
   it("rejects future schemas, unsafe pickle, and empty saved Analyses", () => {
     expect(() =>
       decode(
-        encode(fixture()).replace('"schema_version": 1', '"schema_version": 4'),
+        encode(fixture()).replace('"schema_version": 1', '"schema_version": 8'),
       ),
     ).toThrow();
     expect(() => decode("\x80\x04pickle")).toThrow(/Python app/);
@@ -136,4 +139,66 @@ describe("Python Analysis compatibility and invariants", () => {
     expect(parseTimecode("13.125")).toBe(13125);
     expect(() => parseTimecode("1:99")).toThrow();
   });
+});
+
+it("round trips multiple Categories in v7 while normalizing single/empty selections to legacy fields", () => {
+  const a = fixture(),
+    before = structuredClone(a.clips[0]);
+  const selected = [a.categories[2].id, a.categories[0].id];
+  a.clips[0] = withClipCategories(a.clips[0], selected);
+  expect(clipCategoryIds(a.clips[0])).toEqual(selected);
+  expect(clipCategoryLabels(a.clips[0], a.categories)).toEqual([
+    "Tor",
+    "Abwehr",
+  ]);
+  expect(JSON.parse(encode(a)).schema_version).toBe(7);
+  expect(decode(encode(a))).toEqual(a);
+  const ids = clipCategoryIds(a.clips[0]);
+  ids.reverse();
+  expect(a.clips[0].category_ids).toEqual(selected);
+  a.clips[0] = withClipCategories(a.clips[0], [
+    a.categories[2].id,
+    a.categories[2].id,
+  ]);
+  expect(a.clips[0]).toEqual(before);
+  expect(JSON.parse(encode(a)).schema_version).toBe(1);
+  a.clips[0] = withClipCategories(a.clips[0], []);
+  expect(a.clips[0].category_id).toBeNull();
+  expect(a.clips[0].category_ids).toBeUndefined();
+});
+it("rejects duplicate, dangling, nonprimary-first and redundant category arrays", () => {
+  const a = fixture(),
+    primary = a.clips[0].category_id!;
+  for (const ids of [
+    [primary, primary],
+    [primary, crypto.randomUUID()],
+    [a.categories[0].id, primary],
+    [],
+    [primary],
+    Array.from({ length: 101 }, () => crypto.randomUUID()),
+  ]) {
+    a.clips[0].category_ids = ids;
+    expect(() => analysisSchema.parse(a)).toThrow();
+  }
+});
+it("round trips category-filtered views in v7 and rejects orphan/duplicate saved filters", () => {
+  const a = fixture();
+  a.handball_views = [
+    {
+      id: crypto.randomUUID(),
+      name: "Coaching theme",
+      filters: { outcome: "goal" },
+      query: "",
+      source_video_id: null,
+      category_ids: [a.categories[0].id],
+    },
+  ];
+  expect(JSON.parse(encode(a)).schema_version).toBe(7);
+  expect(decode(encode(a))).toEqual(a);
+  a.handball_views[0].category_ids = [a.categories[0].id, a.categories[0].id];
+  expect(() => analysisSchema.parse(a)).toThrow(/must be unique/);
+  a.handball_views[0].category_ids = [crypto.randomUUID()];
+  expect(() => analysisSchema.parse(a)).toThrow(/unknown Category/);
+  delete a.handball_views[0].category_ids;
+  expect(JSON.parse(encode(a)).schema_version).toBe(5);
 });

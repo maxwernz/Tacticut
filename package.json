@@ -1,6 +1,6 @@
 {
   "name": "tacticut",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Sports video analysis for coaches: tag, cut, annotate, and export match footage",
   "author": "Max Wernz",
@@ -45,7 +45,7 @@
     "vitest": "^4.0.0"
   },
   "build": {
-    "appId": "com.videoanalyse.ts",
+    "appId": "com.maxwernz.tacticut",
     "productName": "Tacticut",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
@@ -64,6 +64,13 @@
     ],
     "afterPack": "scripts/adhoc-sign.cjs",
     "fileAssociations": [
+      {
+        "ext": "tcut",
+        "name": "Tacticut Analysis",
+        "description": "Tacticut Analysis",
+        "role": "Editor",
+        "rank": "Owner"
+      },
       {
         "ext": "analysis",
         "name": "Tacticut Analysis",

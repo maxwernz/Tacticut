@@ -1,3 +1,4 @@
+import { t, useLanguage } from "./i18n";
 import {
   useEffect,
   useId,
@@ -26,6 +27,7 @@ export function Select({
   disabled?: boolean;
   display?: ReactNode;
 }) {
+  useLanguage();
   const id = useId(),
     trigger = useRef<HTMLButtonElement>(null),
     popup = useRef<HTMLDivElement>(null);
@@ -65,7 +67,9 @@ export function Select({
         close();
     };
     const scroll = (e: Event) => {
-      if (!popup.current?.contains(e.target as Node)) close();
+      // Focusing a control in a scrollable editor can scroll its ancestor after
+      // the click. Keep the popup attached instead of immediately dismissing it.
+      if (!popup.current?.contains(e.target as Node)) place();
     };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("scroll", scroll, true);

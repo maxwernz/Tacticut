@@ -10,7 +10,7 @@ const requireNative = createRequire(resolve("package.json"));
 test("opens an Analysis handed over by Finder or Explorer", async () => {
   const dir = await mkdtemp(join(tmpdir(), "va-open-file-test-"));
   const video = join(dir, "match.mp4"),
-    analysis = join(dir, "From Finder.analysis");
+    analysis = join(dir, "From Finder.tcut");
   expect(
     spawnSync(requireNative("ffmpeg-static"), [
       "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25", "-t", "6",
@@ -37,7 +37,7 @@ test("opens an Analysis handed over by Finder or Explorer", async () => {
   );
   const app = await electron.launch({
     args: [resolve(".")],
-    env: { ...process.env, VIDEO_ANALYSE_USER_DATA: join(dir, "user-data") },
+    env: { ...process.env, TACTICUT_USER_DATA: join(dir, "user-data") },
   });
   try {
     const page = await app.firstWindow();

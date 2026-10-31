@@ -239,9 +239,14 @@ test("handball: code clips, persist tags, combine filters and export the exact r
     await page
       .getByRole("button", { name: "Create review playlist", exact: true })
       .click();
+    await expect(page.locator(".dirty-dot")).toHaveCount(1);
     await page.getByTitle("Save Analysis").click();
+    // Wait for the app to finish saving: slow CI machines need more than 5 s.
+    await expect(page.locator(".dirty-dot")).toHaveCount(0, { timeout: 20000 });
     await expect
-      .poll(async () => (await saved()).analysis.playlists.length)
+      .poll(async () => (await saved()).analysis.playlists.length, {
+        timeout: 15000,
+      })
       .toBe(1);
     expect((await saved()).analysis.playlists[0].clip_ids).toEqual([goalId]);
 

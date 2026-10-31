@@ -102,8 +102,9 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
     const canvas = annotation.getByRole("img", {
       name: "Draw on frozen video",
     });
-    const box = (await canvas.boundingBox())!;
     const draw = async (x1: number, y1: number, x2: number, y2: number) => {
+      // Measure each time: the dialog may still be animating into place.
+      const box = (await canvas.boundingBox())!;
       await page.mouse.move(box.x + x1 * box.width, box.y + y1 * box.height);
       await page.mouse.down();
       await page.mouse.move(box.x + x2 * box.width, box.y + y2 * box.height, {
@@ -112,6 +113,7 @@ test("desktop workflow: import, mark, edit, filter, save, reopen and recover", a
       await page.mouse.up();
     };
     await draw(0.2, 0.5, 0.8, 0.5);
+    await expect(canvas.locator("g")).toHaveCount(1);
     await annotation
       .getByRole("button", { name: "Circle", exact: true })
       .click();

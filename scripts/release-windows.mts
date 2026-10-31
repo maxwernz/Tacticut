@@ -71,17 +71,28 @@ if (found.length === 0) {
   }
   if (found.length === 0) fail("The CI build did not start. Check GitHub Actions.");
 }
-let id = found.find((r) => r.conclusion === "success")?.databaseId;
+// CI uploads the installer only after the Windows tests pass, so a run that has
+// it is good enough even if the separate Mac job of that run failed.
+const hasInstaller = (runId: number) =>
+  read("gh", [
+    "api", `repos/${REPO}/actions/runs/${runId}/artifacts`,
+    "--jq", `.artifacts[] | select(.name == "${ARTIFACT}" and .expired == false) | .name`,
+  ]) !== "";
+let id = found
+  .filter((r) => r.status === "completed")
+  .find((r) => hasInstaller(r.databaseId))?.databaseId;
 if (!id) {
   const pending = found.find((r) => r.status !== "completed");
   if (!pending)
-    fail(`Every CI build of ${tag} failed. See https://github.com/${REPO}/actions`);
+    fail(`No CI build of ${tag} produced a Windows installer. See https://github.com/${REPO}/actions`);
   console.log(`Waiting for CI build ${pending!.databaseId} (Windows tests and installer)…`);
   try {
-    run("gh", ["run", "watch", String(pending!.databaseId), "--repo", REPO, "--exit-status", "--interval", "30"]);
+    run("gh", ["run", "watch", String(pending!.databaseId), "--repo", REPO, "--interval", "30"]);
   } catch {
-    fail(`The CI build failed. See https://github.com/${REPO}/actions/runs/${pending!.databaseId}`);
+    /* judged by its artifacts below */
   }
+  if (!hasInstaller(pending!.databaseId))
+    fail(`The Windows build failed. See https://github.com/${REPO}/actions/runs/${pending!.databaseId}`);
   id = pending!.databaseId;
 }
 

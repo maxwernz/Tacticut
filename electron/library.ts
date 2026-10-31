@@ -37,7 +37,13 @@ export class ProjectLibraryStore {
         basename(path),
       ),
     );
-    return process.platform === "win32" ? actual.toLowerCase() : actual;
+    return actual;
+  }
+  /** Windows paths are case-insensitive: compare them that way, but keep the real spelling. */
+  private same(a: string, b: string) {
+    return process.platform === "win32"
+      ? a.toLowerCase() === b.toLowerCase()
+      : a === b;
   }
   private update(
     change: (
@@ -64,7 +70,10 @@ export class ProjectLibraryStore {
       lastOpened: new Date().toISOString(),
     };
     await this.update((entries) =>
-      [entry, ...entries.filter((item) => item.path !== path)].slice(0, 100),
+      [entry, ...entries.filter((item) => !this.same(item.path, path))].slice(
+        0,
+        100,
+      ),
     );
   }
   async list(): Promise<ProjectEntry[]> {
@@ -81,12 +90,12 @@ export class ProjectLibraryStore {
   async forget(path: string) {
     const canonical = await this.canonical(path);
     await this.update((entries) =>
-      entries.filter((item) => item.path !== canonical),
+      entries.filter((item) => !this.same(item.path, canonical)),
     );
   }
   private async knownPath(path: string) {
     const canonical = await this.canonical(path);
-    if (!(await this.read()).some((entry) => entry.path === canonical))
+    if (!(await this.read()).some((entry) => this.same(entry.path, canonical)))
       throw new Error(
         "Choose a project from the library, or add it with Browse projects.",
       );
@@ -112,7 +121,10 @@ export class ProjectLibraryStore {
     const canonical = await Promise.all(
       selected.map((path) => this.knownPath(path)),
     );
-    if (new Set(canonical).size !== canonical.length)
+    const keys = canonical.map((path) =>
+      process.platform === "win32" ? path.toLowerCase() : path,
+    );
+    if (new Set(keys).size !== keys.length)
       throw new Error("Choose each project only once.");
     const documents = await Promise.all(canonical.map((path) => load(path)));
     const availableRecordings = new Map<string, string>();

@@ -1,4 +1,6 @@
-import { basename, dirname, join } from "node:path";
+// Mac bundle paths always use "/", even when this code is tested on Windows.
+import { posix } from "node:path";
+const { basename, dirname, join } = posix;
 
 /**
  * Putting a new build where the running one is. An app cannot replace itself
